@@ -10,8 +10,8 @@
 <meta name="apple-mobile-web-app-title" content="Reise">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' blob: data: https://cdn.jsdelivr.net https://*.currency-api.pages.dev https://api.frankfurter.dev; object-src 'none'; base-uri 'self'; form-action 'none'">
-<link rel="manifest" href="manifest.webmanifest?v=40">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' blob: data: https://*.workers.dev https://cdn.jsdelivr.net https://*.currency-api.pages.dev https://api.frankfurter.dev; object-src 'none'; base-uri 'self'; form-action 'none'">
+<link rel="manifest" href="manifest.webmanifest?v=42">
 <link rel="icon" href="koffer-192.png">
 <link rel="apple-touch-icon" href="koffer-180.png">
 <title>Reise</title>
@@ -630,6 +630,7 @@ ul.steps { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--
 <div class="sheet" id="search" hidden><div class="in" id="search-in"></div></div>
 <div class="sheet" id="place" hidden><div class="in" id="place-in"></div></div>
 <div class="sheet" id="detail" hidden><div class="in" id="detail-in"></div></div>
+<div class="sheet" id="lumo" hidden><div class="in" id="lumo-in"></div></div>
 
 <div class="sheet" id="evform" hidden>
   <form class="in" id="form" novalidate>
@@ -1107,11 +1108,14 @@ function renderHeute() {
     </div></div>`;
   }
   const hint = before ? "" : heuteHint(td, evs, next);
-  s.innerHTML = head + hero + planHtml + moneyHtml + agendaHtml + prepHtml + (hint ? `<div class="callout">${hint}</div>` : "");
+  const lumoHere = before ? "" : placeKey(placeOn(td));
+  const lumoHtml = `<div class="kmenu"><button class="morerow" type="button" id="hp-lumo"><span>Frag ${aiName()}</span><span>${lumoHere ? esc(lumoHere) : "zur Reise"}${ui("chev")}</span></button></div>`;
+  s.innerHTML = head + hero + planHtml + moneyHtml + agendaHtml + prepHtml + (hint ? `<div class="callout">${hint}</div>` : "") + lumoHtml;
   bindTop();
   bindRows(s);
   const hp = $("hpay"); if (hp) hp.addEventListener("click", () => kExpenseSheet(null));
   const h1 = $("hp-pack"); if (h1) h1.addEventListener("click", () => setTab("packen"));
+  $("hp-lumo")?.addEventListener("click", () => openLumo({ place: lumoHere }));
   const h2 = $("hp-open"); if (h2) h2.addEventListener("click", () => { S.rFilter = "open"; S.rView = "list"; setTab("reise"); });
   const h3 = $("hp-save"); if (h3) h3.addEventListener("click", () => openSettings("trip", "sync"));
   const wi = $("welcome-import"); if (wi) wi.addEventListener("click", () => openSettings("trip", "sync"));
@@ -1796,6 +1800,7 @@ function renderDetail() {
       ${atts[0] ? `<button class="btn solid" type="button" id="d-ticket">${ui("ticket")}Ticket öffnen</button>` : ""}
       ${safeLinks(e).map((l, i) => linkBtn(l, !atts[0] && i === 0)).join("")}
       ${nav ? `<a class="btn" href="${esc(nav)}" target="_blank" rel="noopener">${ui("nav")}Navigation</a>` : ""}
+      <button class="btn" type="button" id="d-lumo">Frag ${aiName()}</button>
     </div>
     ${facts ? `<dl class="facts">${facts}</dl>` : ""}
     ${atts.length ? `<div><p class="label">Tickets und Anhänge</p><div class="files">${atts.map((a, i) => fileHtml(a, i)).join("")}</div></div>` : (e.placeholder && canEdit() ? `<p class="note">Hier fehlen noch Uhrzeiten und Tickets. Tippe auf „Bearbeiten“.</p>` : "")}
@@ -1806,6 +1811,7 @@ function renderDetail() {
       ? `<div class="confirm">Termin und Anhänge löschen? <button class="btn danger" type="button" id="d-del-yes">Löschen</button><button class="btn quiet" type="button" id="d-del-no">Abbrechen</button></div>`
       : `<div><button class="btn quiet danger" type="button" id="d-del">Termin löschen</button></div>`) : ""}`;
   $("d-back").addEventListener("click", closeDetail);
+  $("d-lumo")?.addEventListener("click", () => openLumo({ event: e.id }));
   $("cf-open")?.addEventListener("click", (ev) => openDetail(ev.currentTarget.dataset.id));
   $("cf-ok")?.addEventListener("click", async (ev) => {
     const o = ev.currentTarget.dataset.id, cur = S.events.find((x) => x.id === e.id);
@@ -2725,13 +2731,13 @@ const LocalDB = {
     const key = coll + "/" + id;
     return {
       id, path: key,
-      async set(data) { await putRecs([{ key, coll, id, data: clone(data), updatedAt: Date.now(), deleted: false }]); },
+      async set(data) { await putRecs([{ key, coll, id, data: clone(data), updatedAt: Date.now(), deleted: false }]); syncSoon(); },
       async update(data) {
         const r = RECS.get(key);
         if (!r || r.deleted) throw { code: "invalid_argument" };
-        await putRecs([{ ...r, data: deepMerge(r.data, data), updatedAt: Date.now() }]);
+        await putRecs([{ ...r, data: deepMerge(r.data, data), updatedAt: Date.now() }]); syncSoon();
       },
-      async delete() { await putRecs([{ key, coll, id, data: {}, updatedAt: Date.now(), deleted: true }]); }
+      async delete() { await putRecs([{ key, coll, id, data: {}, updatedAt: Date.now(), deleted: true }]); syncSoon(); }
     };
   }
 };
@@ -3176,8 +3182,19 @@ async function importMessageText(text) {
     status.innerHTML = e && e.code === "pw" ? await pwFailText(e.tag, pw, "Nachricht", e.n ? { n: e.n, want: e.want, end: e.end } : 0) : e && e.code === "old" ? "Dieses Handy ist zu alt für gepackte Nachrichten. Bitte die Datei nehmen." : "Darin sind keine Reise-Daten. Die ganze Nachricht kopieren, auch den Teil mit „RD1.“ oder „RT.“.";
     return false;
   }
-  S.fromMessage = true;
   setPref("msgparts", "");
+  if (payload && payload.format === "reise-abgleich") {
+    if (!/^https:\/\/[^\s/]+\.workers\.dev\/?$/.test(payload.url || "") || !payload.token || !payload.room) { status.textContent = "Die Einladung ist unvollständig."; return false; }
+    setPref("pw", pw);   // für den Abgleich im Hintergrund nötig
+    setSyncCfg({ url: payload.url, token: payload.token, room: payload.room });
+    status.textContent = "Automatischer Abgleich eingerichtet. Hole den Stand der anderen Person …";
+    const r = await syncNow("manual");
+    const done = r && r.ok ? `Automatischer Abgleich läuft. ${r.got ? r.got + " Einträge übernommen." : "Alles schon gleich."} Die Einladung in WhatsApp kannst du jetzt löschen.` : `Eingerichtet, aber der erste Abgleich ging nicht: ${syncErrText(r && r.error)}`;
+    syncBoot(); renderSettings();
+    const st2 = $("st-importstatus"); if (st2) st2.textContent = done; toast(r && r.ok ? "Automatischer Abgleich eingerichtet" : "Abgleich eingerichtet, erster Versuch ging nicht");
+    return true;
+  }
+  S.fromMessage = true;
   await importTripFile([new File([JSON.stringify(payload)], "Nachricht.json", { type: "application/json" })]);
   return true;
 }
@@ -3352,6 +3369,7 @@ function renderSettings() {
       ${S.msgSend ? `<div class="field wide" id="st-partbox"><p class="note" style="margin:0 0 8px">${S.msgSend.i < S.msgSend.parts.length ? `Die Nachricht ist lang und geht in ${S.msgSend.parts.length} Teilen raus. Jeden Teil in WhatsApp senden, die andere Person fügt sie nacheinander ein.` : `Alle ${S.msgSend.parts.length} Teile sind verschickt.`}</p><div class="actions">${S.msgSend.i < S.msgSend.parts.length ? `<button class="btn solid" type="button" id="st-partgo">Teil ${S.msgSend.i + 1} von ${S.msgSend.parts.length} senden</button>` : ""}<button class="btn" type="button" id="st-partend">${S.msgSend.i < S.msgSend.parts.length ? "Abbrechen" : "Fertig"}</button></div></div>` : ""}
       <div class="field wide" id="st-pastebox" hidden><label for="st-pastetext">Nachricht einfügen</label><textarea id="st-pastetext" rows="3" placeholder="Lange tippen und „Einsetzen“"></textarea><div class="actions" style="margin-top:8px"><button class="btn solid" type="button" id="st-pastego">Einlesen</button></div></div>
       ${app ? "" : `<p class="note" style="margin:0">„Als Nachricht teilen“ schickt alles ausser den Tickets als verschlüsselten Text, z. B. per WhatsApp, bei viel Inhalt in mehreren Teilen. Die andere Person kopiert jede Nachricht und tippt in der App auf „Aus Nachricht einfügen“.</p>`}
+      ${app ? "" : syncBoxHtml()}
       <p class="note" id="st-importstatus" aria-live="polite">${lastEx ? `Zuletzt gesichert: ${fmtWhen(lastEx)}. ` : ""}${lastIm ? `Zuletzt eingelesen: ${fmtWhen(lastIm)}.` : ""}</p>`;
     else if (pg === "kasse") c = S.kasse ? `
       <div class="kmenu">
@@ -3426,6 +3444,7 @@ function renderSettings() {
   });
   $("st-pendgo")?.addEventListener("click", runPendingShare);
   $("st-partgo")?.addEventListener("click", sharePart);
+  bindSyncBox();
   $("st-partend")?.addEventListener("click", () => { S.msgSend = null; renderSettings(); });
   $("st-paste")?.addEventListener("click", async () => {
     let t = "";
@@ -3816,7 +3835,298 @@ document.addEventListener("click", async (ev) => {
   catch { window.open(url, "_blank", "noopener"); }
 }, true);
 
-const APP_VERSION = "40";
+
+/* ---------- Frag Lumo: Frage vorbereiten, kopieren, Lumo öffnen, Antwort als Tipps übernehmen ----------
+   Kein Zugriff der App auf Lumo: es geht nur der Text weg, den man sieht und selbst kopiert. */
+const AIS = { lumo: { name: "Lumo", url: () => "https://lumo.proton.me/" }, claude: { name: "Claude", url: (q) => "https://claude.ai/new?q=" + encodeURIComponent(q.slice(0, 1800)) } };
+function aiWho() { const k = pref("aiwho", "lumo"); return AIS[k] ? k : "lumo"; }
+function aiName() { return AIS[aiWho()].name; }
+const LUMO_ASKS = {
+  near: ["Unternehmen", (c) => `Was können wir ${c.near} gut machen? Gern auch ruhige, weniger bekannte Orte.`],
+  food: ["Essen", (c) => `Wo essen wir ${c.near} gut? Typisch für die Gegend, keine Touristenfallen.`],
+  rain: ["Bei Regen", (c) => `Was machen wir ${c.near}, wenn es regnet oder sehr heiss ist?`],
+  way: ["Ablauf", (c) => c.move ? `Wie läuft die Fahrt ${c.at} ab? Worauf müssen wir achten (Gepäck, Umsteigen, Zeit)?` : `Wie kommen wir ${c.at} am besten hin und herum? Was sollten wir dort wissen?`],
+  own: ["Eigene Frage", () => ""]
+};
+const LS = { ctx: null, ask: "near", step: 1, items: [] };
+function lumoContext(o) {
+  const e = o.event ? S.events.find((x) => x.id === o.event) : null;
+  const t = S.trip || {};
+  if (e) {
+    const place = placeKey(e.move ? e.to : e.place);
+    const endD = e.end ? localDateIn(e.end, e.endTz) : "";
+    const when = endD && endD !== e.sdate ? `vom ${fmtShort(e.sdate)} bis ${fmtShort(endD)}` : `am ${fmtShort(e.sdate)}`;
+    const own = String(e.title || "").trim();
+    if (e.move) return { event: e.id, place, move: true, at: `von ${e.from || "?"} nach ${e.to || "?"}`, near: `nach der Ankunft in ${e.to || "?"}`, facts: `${TYPE[e.type].label} von ${e.from || "?"} nach ${e.to || "?"}, ${when}.` };
+    const where = place ? ` in ${place}` : "";
+    if (e.type === "hotel") return { event: e.id, place, at: `${where.trim() || "dort"}`, near: `rund um unsere Unterkunft${own ? ` „${own}“` : ""}${where}`, facts: `Wir übernachten${own ? ` im „${own}“` : ""}${where}, ${when}.` };
+    return { event: e.id, place, at: `${where.trim() || "dort"}`, near: `rund um ${own ? `„${own}“` : "diesen Programmpunkt"}${where}`, facts: `${TYPE[e.type].label}${own ? ` „${own}“` : ""}${where}, ${when}.` };
+  }
+  const place = o.place || "";
+  const span = t.start && t.end ? ` vom ${fmtShort(t.start)} bis ${fmtShort(t.end)}` : "";
+  const lands = tripCountries().join(", ");
+  return { event: "", place, at: place ? `in ${place}` : "auf unserer Reise", near: place ? `in ${place}` : "auf unserer Reise", facts: place ? `Wir sind heute (${fmtShort(today())}) in ${place}.` : `Wir machen eine Reise${span}${lands ? " durch " + lands : ""}.` };
+}
+function lumoQuestion() {
+  const c = LS.ctx, like = pref("lumolike", "").trim();
+  const ask = LUMO_ASKS[LS.ask][1](c);
+  const tail = `Antworte kurz auf Deutsch. Schreib am Schluss jeden Tipp auf eine eigene Zeile, genau so:\nTIPP | Bereich | Ort | Tipp in einem Satz\nBereich ist eines von: Essen, Sehen, Shopping, Ausgehen, Unterkunft, Praktisch.`;
+  return `${c.facts} Wir reisen zu zweit.${like ? " Uns gefällt: " + like + "." : ""}\n\n${ask}\n\n${tail}`;
+}
+function openLumo(o) {
+  let saved = null; try { saved = JSON.parse(pref("lumoctx", "null")); } catch {}
+  LS.ctx = lumoContext(o); LS.ask = LS.ctx.move ? "way" : "near"; LS.items = [];
+  LS.step = saved && saved.key === (LS.ctx.event || LS.ctx.place) ? 2 : 1;
+  renderLumo(); showSheet("lumo");
+}
+function lumoCat(s) {
+  const t = String(s || "").toLowerCase();
+  if (/ess|trink|food|restau|caf|bar\b/.test(t)) return /bar|ausgeh|nacht/.test(t) ? "ausgehen" : "essen";
+  if (/shop|einkauf|markt/.test(t)) return "shopping";
+  if (/ausgeh|nacht|bar/.test(t)) return "ausgehen";
+  if (/unterk|hotel/.test(t)) return "unterkunft";
+  if (/prakt|tipp|info|transport|geld/.test(t)) return "praktisch";
+  return "sehen";
+}
+function lumoParse(text) {
+  const out = [], lines = String(text || "").split(/\r?\n/);
+  for (const l of lines) {
+    const m = /^\W*TIPP\W*\|\s*([^|]*)\|\s*([^|]*)\|\s*(.+)$/i.exec(l.trim());
+    if (m) out.push({ cat: lumoCat(m[1]), city: m[2].trim() || LS.ctx.place, text: m[3].replace(/\*\*/g, "").trim(), include: true });
+  }
+  if (out.length) return out;
+  for (const l of lines) {   // ohne Format: Aufzählungspunkte nehmen
+    const m = /^\s*(?:[-•*]|\d+[.)])\s+(.{12,})$/.exec(l);
+    if (m) { const tx = m[1].replace(/\*\*/g, "").trim(); out.push({ cat: lumoCat(tx), city: LS.ctx.place, text: tx, include: true }); }
+  }
+  return out;
+}
+function renderLumo() {
+  const box = $("lumo-in"), c = LS.ctx;
+  const head = `<div class="top"><button class="back" type="button" id="lu-back">${ui("back", 1.6)}Zurück</button></div>
+    <div><div class="dt-kind">Frag ${aiName()}${c.place ? " · " + esc(c.place) : ""}</div><h1 class="dt-title">${LS.step === 1 ? "Frage vorbereiten" : "Antwort übernehmen"}</h1></div>`;
+  if (LS.step === 1) {
+    box.innerHTML = head + `
+      <div class="seg" role="tablist" aria-label="Wen fragen">${Object.entries(AIS).map(([k, a]) => `<button type="button" role="tab" data-aw="${k}" aria-selected="${aiWho() === k}">${a.name}</button>`).join("")}</div>
+      <div class="chips" role="group" aria-label="Worum geht es" style="flex-wrap:wrap">${Object.entries(LUMO_ASKS).filter(([k]) => k !== "way" || c.move || c.event).map(([k, [l]]) => `<button type="button" class="chip" data-la="${k}" aria-pressed="${LS.ask === k}">${l}</button>`).join("")}</div>
+      <div class="field wide"><label for="lu-like">Was euch gefällt <span class="hint">(bleibt auf diesem Handy)</span></label><input id="lu-like" value="${esc(pref("lumolike", ""))}" placeholder="z. B. Natur, gutes Essen, Märkte, ruhige Orte"></div>
+      <div class="field wide"><label for="lu-q">Diese Frage geht an ${aiName()}</label><textarea id="lu-q" rows="9">${esc(lumoQuestion())}</textarea></div>
+      <p class="note" style="margin:0">Nur dieser Text verlässt das Handy, und nur, wenn du ihn in ${aiName()} sendest. Keine Namen, Buchungsnummern oder Notizen. Du kannst ihn vorher ändern.</p>
+      <div class="actions"><button class="btn solid" type="button" id="lu-go">${aiName()} öffnen</button>${navigator.share ? `<button class="btn" type="button" id="lu-share">Über Teilen senden</button>` : ""}<button class="btn quiet" type="button" id="lu-have">Antwort schon da</button></div>
+      <p class="note" style="margin:0">Zurück in der Reise-App erkennt sie die kopierte Antwort selbst.</p>`;
+  } else {
+    box.innerHTML = head + `
+      <p class="note" style="margin:0">In ${aiName()} die Antwort kopieren (Kopieren-Symbol unter der Antwort) und hier einfügen. Die App macht daraus Tipps${c.event ? " zu diesem Termin" : ""}, du wählst aus.</p>
+      <div class="field wide"><label for="lu-a">Antwort von ${aiName()}</label><textarea id="lu-a" rows="6" placeholder="Lange tippen und „Einsetzen“"></textarea></div>
+      <div class="actions"><button class="btn" type="button" id="lu-parse">Tipps erkennen</button><button class="btn quiet" type="button" id="lu-again">Neue Frage</button></div>
+      <div id="lu-prev">${LS.items.map((it, i) => `<div class="prev ${it.include ? "" : "off"}">
+        <div class="prev-top"><textarea id="lu-t-${i}" aria-label="Tipp">${esc(it.text)}</textarea><button type="button" class="chk" data-li="${i}" aria-pressed="${it.include}" aria-label="Übernehmen">${it.include ? ui("check", 2) : ""}</button></div>
+        <div class="pr"><span class="field"><label for="lu-c-${i}">Ort</label><input id="lu-c-${i}" list="citylist" value="${esc(it.city)}"></span>
+        <span class="field"><label for="lu-k-${i}">Bereich</label><select id="lu-k-${i}">${TIPCATS.map(([k, l]) => `<option value="${k}" ${k === it.cat ? "selected" : ""}>${l}</option>`).join("")}</select></span></div></div>`).join("")}</div>
+      ${LS.items.length ? `<div class="actions"><button class="btn solid" type="button" id="lu-save">${LS.items.filter((x) => x.include).length} Tipps übernehmen</button></div>` : ""}
+      <p class="note" id="lu-status" aria-live="polite"></p>`;
+  }
+  $("lu-back").addEventListener("click", () => hideSheet("lumo"));
+  box.querySelectorAll("[data-la]").forEach((b) => b.addEventListener("click", () => { LS.ask = b.dataset.la; setPref("lumolike", $("lu-like").value.trim()); renderLumo(); if (LS.ask === "own") $("lu-q").focus(); }));
+  $("lu-like")?.addEventListener("change", (ev) => { setPref("lumolike", ev.target.value.trim()); $("lu-q").value = lumoQuestion(); });
+  box.querySelectorAll("[data-aw]").forEach((b) => b.addEventListener("click", () => { setPref("aiwho", b.dataset.aw); const q = $("lu-q").value; renderLumo(); $("lu-q").value = q; }));
+  const asked = (how) => {
+    setPref("lumoctx", JSON.stringify({ key: c.event || c.place, event: c.event, place: c.place, at: Date.now() }));
+    LS.step = 2; renderLumo();
+    if (how === "copied") toast(`Frage kopiert. In ${aiName()} einfügen, falls sie nicht schon dasteht.`);
+  };
+  $("lu-go")?.addEventListener("click", async () => {
+    const q = $("lu-q").value.trim(); if (!q) { $("lu-q").focus(); return; }
+    setPref("lumolike", $("lu-like").value.trim());
+    try { await navigator.clipboard.writeText(q); } catch {}
+    window.open(AIS[aiWho()].url(q), "_blank", "noopener");
+    asked("copied");
+  });
+  $("lu-share")?.addEventListener("click", async () => {
+    const q = $("lu-q").value.trim(); if (!q) { $("lu-q").focus(); return; }
+    setPref("lumolike", $("lu-like").value.trim());
+    try { await navigator.share({ text: q }); asked("shared"); } catch (e) { if (!(e && e.name === "AbortError")) toast("Teilen ging nicht. Nimm „" + aiName() + " öffnen“."); }
+  });
+  $("lu-have")?.addEventListener("click", () => { LS.step = 2; renderLumo(); });
+  $("lu-again")?.addEventListener("click", () => { setPref("lumoctx", ""); LS.step = 1; LS.items = []; renderLumo(); });
+  const readItems = () => LS.items.forEach((it, i) => { const t = $("lu-t-" + i), ci = $("lu-c-" + i), k = $("lu-k-" + i); if (t) it.text = t.value.trim(); if (ci) it.city = ci.value.trim(); if (k) it.cat = k.value; });
+  $("lu-parse")?.addEventListener("click", () => {
+    const a = $("lu-a").value; LS.items = lumoParse(a); renderLumo();
+    $("lu-status").textContent = LS.items.length ? `${LS.items.length} Tipps erkannt. Prüfen, abwählen was nicht passt, dann übernehmen.` : "Keine Tipps erkannt. Die ganze Antwort kopieren, auch die Zeilen mit „TIPP |“.";
+    if (!LS.items.length) $("lu-a").value = a;
+  });
+  box.querySelectorAll("[data-li]").forEach((b) => b.addEventListener("click", () => { readItems(); const it = LS.items[+b.dataset.li]; it.include = !it.include; renderLumo(); }));
+  $("lu-save")?.addEventListener("click", async (ev) => {
+    if (!canEdit()) return;
+    readItems(); const list = LS.items.filter((x) => x.include && x.text); const btn = ev.currentTarget; btn.disabled = true;
+    try {
+      for (const it of list) await S.db.collection("tips").doc().set({ event: c.event || "", city: it.city || c.place, country: (findCity(it.city || c.place) || {}).country || "", cat: it.cat, text: it.text, from: "Lumo", order: Date.now(), done: false, createdAt: new Date().toISOString() });
+      setPref("lumoctx", ""); LS.items = []; LS.step = 1; hideSheet("lumo"); toast(`${list.length} Tipps übernommen`);
+      if (S.detailId) renderDetail();
+    } catch { btn.disabled = false; toast("Speichern ging nicht."); }
+  });
+}
+
+// Zurück aus Lumo/Claude: liegt eine Antwort mit „TIPP |“-Zeilen in der Zwischenablage, gleich anbieten
+let aiChecking = false;
+async function aiCheckReturn() {
+  if (aiChecking || document.hidden) return;
+  let ctx = null; try { ctx = JSON.parse(pref("lumoctx", "null")); } catch {}
+  if (!ctx || Date.now() - (ctx.at || 0) > 3 * 3600 * 1000 || Date.now() - (ctx.at || 0) < 4000) return;
+  if (!$("lumo").hidden && $("lu-a") && $("lu-a").value.trim()) return;
+  if (!navigator.clipboard || !navigator.clipboard.readText) return;
+  aiChecking = true;
+  try {
+    const t = await navigator.clipboard.readText();
+    if (!/TIPP\s*\|/i.test(t || "")) return;
+    if (ctx.event && !S.events.some((e) => e.id === ctx.event)) return;
+    LS.ctx = lumoContext(ctx.event ? { event: ctx.event } : { place: ctx.place });
+    LS.ask = "near"; LS.items = lumoParse(t); LS.step = 2;
+    if (!LS.items.length) return;
+    renderLumo(); showSheet("lumo");
+    const ta = $("lu-a"); if (ta) ta.value = t;
+    const stl = $("lu-status"); if (stl) stl.textContent = `Antwort von ${aiName()} erkannt: ${LS.items.length} Tipps. Prüfen, dann übernehmen.`;
+  } catch {} finally { aiChecking = false; }
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) setTimeout(aiCheckReturn, 400); });
+
+/* ---------- Automatischer Abgleich über einen kleinen eigenen Speicher (Cloudflare Worker, siehe abgleich/) ----------
+   Jedes Handy legt seinen ganzen Stand (ohne Tickets) verschlüsselt ab und holt die Stände der anderen.
+   Zusammengeführt wird wie beim Einlesen: pro Eintrag gilt der neuere. Der Speicher sieht nur „RD1.…“-Text. */
+const SY = { timer: null, busy: false, dirty: false };
+function syncKey() { return "sync-" + TRIP.id; }
+function syncCfg() { try { const c = JSON.parse(pref(syncKey(), "null")); return c && c.url && c.token && c.room ? c : null; } catch { return null; } }
+function setSyncCfg(c) { setPref(syncKey(), c ? JSON.stringify(c) : ""); }
+function syncDev() { let d = pref("syncdev", ""); if (!/^[A-Za-z0-9]{8,}$/.test(d)) { d = rndCode(12); setPref("syncdev", d); } return d; }
+function rndCode(n) { const A = "ACDEFHJKLMNPRTUVWXYacdefhjkmnprtuvwxy34679"; return Array.from(crypto.getRandomValues(new Uint8Array(n)), (x) => A[x % A.length]).join(""); }
+function syncState() { try { return JSON.parse(pref("syncstate-" + TRIP.id, "{}")) || {}; } catch { return {}; } }
+function setSyncState(o) { setPref("syncstate-" + TRIP.id, JSON.stringify({ ...syncState(), ...o })); }
+function syncSoon() { if (!syncCfg()) return; SY.dirty = true; setSyncState({ dirty: true }); clearTimeout(SY.timer); SY.timer = setTimeout(() => syncNow("change"), 15000); }
+async function syncFetch(c, path, opt = {}) {
+  const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 20000);
+  try {
+    const r = await fetch(c.url.replace(/\/+$/, "") + path, { ...opt, signal: ctl.signal, cache: "no-store", headers: { ...(opt.headers || {}), Authorization: "Bearer " + c.token } });
+    if (r.status === 401) throw { code: "key" };
+    if (!r.ok && r.status !== 404) throw { code: "http", status: r.status };
+    return r.status === 404 ? null : await r.json();
+  } catch (e) { throw e && e.code ? e : { code: e && e.name === "AbortError" ? "timeout" : "net" }; }
+  finally { clearTimeout(to); }
+}
+function syncWifiOk(reason) {
+  if (reason === "manual" || pref("syncwifi", "1") !== "1") return true;
+  const c = navigator.connection; return !(c && (c.type === "cellular" || c.saveData));
+}
+// Abgleiche laufen nacheinander; kommt während eines Abgleichs ein neuer Wunsch, läuft danach genau einer
+function syncNow(reason) {
+  if (SY.pending) { if (reason === "manual") SY.pendingReason = "manual"; return SY.pending; }
+  SY.pendingReason = reason;
+  SY.pending = (SY.queue || Promise.resolve()).then(() => { const r = SY.pendingReason; SY.pending = null; return syncCore(r); });
+  SY.queue = SY.pending.catch(() => {});
+  return SY.pending;
+}
+async function syncCore(reason) {
+  const c = syncCfg(), pw = pref("pw", "");
+  if (!c || !pw || !S.loaded) return { skipped: true };
+  if (!navigator.onLine) return { skipped: true, why: "offline" };
+  if (!syncWifiOk(reason)) return { skipped: true, why: "wifi" };
+  SY.busy = true;
+  const st = syncState(), me = syncDev(), seen = st.seen || {};
+  let got = 0, readErr = "";
+  try {
+    const list = await syncFetch(c, `/r/${c.room}`);
+    for (const it of (list && list.items) || []) {
+      if (!it || it.dev === me || !(it.at > (seen[it.dev] || 0))) continue;
+      const one = await syncFetch(c, `/r/${c.room}/${it.dev}`);
+      if (!one || !one.data) continue;
+      let payload;
+      try { payload = await unpackMessage(one.data, pw); } catch (e) { readErr = e && e.code === "pw" ? "pw" : "data"; continue; }
+      if (payload && payload.format === "reise-daten") { payload.tripId = TRIP.id; const r = await mergePayload(payload); got += r.added + r.updated; }
+      seen[it.dev] = it.at;
+    }
+    const dayOld = Date.now() - (st.upAt || 0) > 20 * 3600 * 1000;
+    if (SY.dirty || st.dirty || !st.upAt || dayOld || got || reason === "manual") {
+      const body = await packMessage(await buildPayload(false), pw);
+      const r = await syncFetch(c, `/r/${c.room}/${me}`, { method: "PUT", headers: { "Content-Type": "text/plain" }, body });
+      SY.dirty = false; setSyncState({ dirty: false, upAt: (r && r.at) || Date.now() });
+    }
+    setSyncState({ seen, at: Date.now(), err: readErr, errAt: readErr ? Date.now() : 0, got: got || 0 });
+    if (got && reason !== "manual") toast(`${got} ${got === 1 ? "Änderung" : "Änderungen"} von unterwegs übernommen`);
+    return { ok: true, got };
+  } catch (e) {
+    setSyncState({ err: (e && e.code) || "net", errAt: Date.now() });
+    return { error: (e && e.code) || "net" };
+  } finally { SY.busy = false; syncPaint(); }
+}
+function syncErrText(code) {
+  return { key: "Der Schlüssel passt nicht zum Speicher.", pw: "Ein Handy speichert mit einem anderen Passwort. Kennung auf beiden Handys vergleichen.", data: "Ein Stand im Speicher liess sich nicht lesen.", timeout: "Der Speicher antwortet nicht.", net: "Keine Verbindung zum Speicher.", http: "Der Speicher meldet einen Fehler." }[code] || "Abgleich ging nicht.";
+}
+async function syncInvite() {
+  const c = syncCfg(), pw = pref("pw", ""); if (!c || !pw) return;
+  const code = await packMessage({ format: "reise-abgleich", url: c.url, token: c.token, room: c.room, tripTitle: (S.trip && S.trip.title) || "" }, pw);
+  const r = await sendText(`Einladung zum automatischen Abgleich der Reise-App. In der App: Einstellungen → Sichern und abgleichen → „Aus Nachricht einfügen“. Danach diese Nachricht löschen.\n\n${code}`);
+  if (r === "copied") toast("Einladung kopiert. An die andere Person schicken.");
+}
+
+function agoText(ms) { const m = Math.round((Date.now() - ms) / 60000); return m < 1 ? "gerade eben" : m < 60 ? `vor ${m} Min.` : m < 1440 ? `vor ${Math.round(m / 60)} Std.` : fmtWhen(ms); }
+function syncStatusText() {
+  const c = syncCfg(), st = syncState();
+  if (!c) return "";
+  if (!pref("pw", "")) return "Pausiert: Passwort oben eintragen und „Auf diesem Gerät merken“ wählen.";
+  if (SY.busy) return "Gleiche ab …";
+  if (st.err && (st.errAt || 0) >= (st.at || 0)) return `Zuletzt versucht ${agoText(st.errAt)}: ${syncErrText(st.err)}`;
+  return st.at ? `Läuft. Zuletzt abgeglichen ${agoText(st.at)}.` : "Eingerichtet, noch nicht abgeglichen.";
+}
+function syncPaint() { const el = $("st-syncstatus"); if (el) el.textContent = syncStatusText(); }
+function syncBoxHtml() {
+  const c = syncCfg();
+  if (c) return `<div><p class="label">Automatischer Abgleich</p>
+      <p class="note" id="st-syncstatus" aria-live="polite" style="margin:0 0 10px">${esc(syncStatusText())}</p>
+      <div class="actions"><button class="btn" type="button" id="st-syncnow">Jetzt abgleichen</button><button class="btn" type="button" id="st-syncinv">Einladung teilen</button><button class="btn quiet" type="button" id="st-syncoff">Ausschalten</button></div>
+      <label class="check" style="margin-top:8px"><input type="checkbox" id="st-syncwifi" ${pref("syncwifi", "1") === "1" ? "checked" : ""}> Unterwegs nur im WLAN abgleichen (wirkt nur auf Android)</label>
+      <p class="note" style="margin:6px 0 0">Gleicht beim Öffnen, nach Änderungen und alle 15 Minuten ab, solange die App offen ist. Tickets gehen nicht mit, dafür weiterhin „Alles sichern“.</p></div>`;
+  return `<details class="tips" id="st-syncset"><summary><span>Automatisch abgleichen</span><span>+</span></summary><div style="display:grid;gap:12px;padding-bottom:14px">
+      <p class="note" style="margin:0">Beide Handys gleichen sich selbst ab, über euren eigenen kleinen Speicher. Ein Handy richtet ihn ein und teilt eine Einladung, das andere fügt sie unter „Aus Nachricht einfügen“ ein. Alles bleibt mit eurem Passwort verschlüsselt.</p>
+      <div class="field wide"><label for="st-syncurl">Adresse des Speichers</label><input id="st-syncurl" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://reise-abgleich.name.workers.dev"></div>
+      <div class="field wide"><label for="st-synctoken">Schlüssel</label><input id="st-synctoken" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="der lange Schlüssel aus Cloudflare"></div>
+      <div class="actions"><button class="btn solid" type="button" id="st-syncsetup">Einrichten</button></div>
+      <p class="note" id="st-syncmsg" aria-live="polite" style="margin:0"></p></div></details>`;
+}
+function bindSyncBox() {
+  $("st-syncnow")?.addEventListener("click", async (ev) => { ev.currentTarget.disabled = true; const r = await syncNow("manual"); toast(r && r.ok ? (r.got ? `${r.got} Einträge übernommen` : "Alles gleich") : r && r.skipped ? "Gerade kein Abgleich möglich" : syncErrText(r && r.error)); renderSettings(); });
+  $("st-syncinv")?.addEventListener("click", () => syncInvite());
+  $("st-syncoff")?.addEventListener("click", () => { setSyncCfg(null); setPref("syncstate-" + TRIP.id, ""); toast("Automatischer Abgleich ausgeschaltet"); renderSettings(); });
+  $("st-syncwifi")?.addEventListener("change", (ev) => setPref("syncwifi", ev.target.checked ? "1" : "0"));
+  $("st-syncsetup")?.addEventListener("click", async (ev) => {
+    const msg = $("st-syncmsg"), btn = ev.currentTarget;
+    let url = $("st-syncurl").value.trim(); const token = $("st-synctoken").value.trim(), pw = $("st-pw").value;
+    if (url && !/^https?:\/\//.test(url)) url = "https://" + url;
+    url = url.replace(/\/+$/, "");
+    if (!/^https:\/\/[^\s/]+\.workers\.dev$/.test(url)) { msg.textContent = "Die Adresse endet auf „.workers.dev“ und steht in Cloudflare beim Worker."; return; }
+    if (token.length < 16) { msg.textContent = "Der Schlüssel ist zu kurz (mindestens 16 Zeichen)."; return; }
+    if (pw.length < 8) { msg.textContent = "Oben zuerst das Reise-Passwort eintragen."; $("st-pw").focus(); return; }
+    btn.disabled = true; msg.textContent = "Prüfe den Speicher …";
+    try {
+      const t = await syncFetch({ url, token }, "/");
+      if (!t || t.app !== "reise-abgleich") { msg.textContent = "Unter dieser Adresse läuft kein Reise-Speicher."; return; }
+    } catch (e) { msg.textContent = syncErrText(e && e.code); return; }
+    finally { btn.disabled = false; }
+    setPref("pw", pw);
+    setSyncCfg({ url, token, room: rndCode(16) });
+    const r = await syncNow("manual");
+    syncBoot(); renderSettings();
+    toast(r && r.ok ? "Eingerichtet. Jetzt die Einladung teilen." : syncErrText(r && r.error));
+  });
+}
+function syncBoot() {
+  if (!syncCfg() || SY.booted) return; SY.booted = true;
+  setTimeout(() => syncNow("open"), 1500);
+  setInterval(() => { if (!document.hidden) syncNow("tick"); }, 15 * 60 * 1000);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) { if (Date.now() - (syncState().at || 0) > 120000) syncNow("open"); }
+    else if (SY.dirty) { clearTimeout(SY.timer); syncNow("leave"); }
+  });
+}
+const APP_VERSION = "42";
 /* ---------- Render & boot ---------- */
 function render() {
   _sorted = null; _conf = null; _pres = null;
@@ -4795,7 +5105,7 @@ render();
 setInterval(tickCountdown, 30000);
 setInterval(rerender, 300000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) rerender(); });
-loadAll().then(() => { S.loaded = true; S.live = true; emit(); takeShared(); }).catch(() => { S.loaded = true; S.loadError = true; render(); });
+loadAll().then(() => { S.loaded = true; S.live = true; emit(); takeShared(); syncBoot(); aiCheckReturn(); }).catch(() => { S.loaded = true; S.loadError = true; render(); });
 if ("serviceWorker" in navigator && (location.protocol === "https:" || /^(localhost|127\.0\.0\.1)$/.test(location.hostname))) {
   const hadController = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then((r) => r.update()).catch(() => {});
