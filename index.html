@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="referrer" content="no-referrer">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' blob: data: https://cdn.jsdelivr.net https://*.currency-api.pages.dev https://api.frankfurter.dev; object-src 'none'; base-uri 'self'; form-action 'none'">
-<link rel="manifest" href="manifest.webmanifest?v=32">
+<link rel="manifest" href="manifest.webmanifest?v=34">
 <link rel="icon" href="koffer-192.png">
 <link rel="apple-touch-icon" href="koffer-180.png">
 <title>Reise</title>
@@ -199,6 +199,15 @@ a { color: inherit; }
 .washp b { font-weight: 500; color: var(--ink); }
 .washp .warn { color: var(--danger); }
 .washp .tight { color: var(--wood); }
+.pkprog { display: grid; gap: 8px; }
+.pkbar { height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; }
+.pkbar i { display: block; height: 100%; background: var(--moss); }
+.pkprog span { font-size: 13px; color: var(--muted); }
+.pkprog b { font-weight: 500; color: var(--ink); }
+.pkcats { display: grid; }
+.pkcat .pkcatin { padding: 2px 0 10px; }
+.pkcat .sub svg { width: 12px; height: 12px; vertical-align: -1px; color: var(--moss); }
+.pkcat.alldone > .band b { color: var(--muted); }
 .pkcheck summary .warn { color: var(--danger); }
 .pkcheck summary .tight { color: var(--wood); }
 .pkcheckin { display: grid; min-width: 0; }
@@ -1147,13 +1156,52 @@ function moveSides(e) {
 function isBorder(e) { if (!e.move || !phases().length) return false; const [a, b] = moveSides(e); return a !== b; }
 // Fahrten zu Reisen zusammenfassen: geht es am Zielort ohne Übernachtung und ohne Termin innert 20 Stunden weiter
 // (z. B. Flug zu einem Flughafen, dann Fähre zur Insel), ist der Zwischenort nur ein Umstieg und keine Station.
-const legKey = (n) => n ? norm(stationName(n)) : "";
+// Ortsnamen vereinheitlichen: "Dorf (Ortsteil)" = "Dorf", "Flughafen Stadt (ABC)" = "Stadt",
+// "Strandhotel, Insel" = "Insel", ein Hotelname = der Ort dieses Hotels
+let _pres = null;
+function baseName(n) { return stationName(String(n || "").replace(/\s*\([^)]*\)/g, " ").replace(/\s+/g, " ").trim()); }
+const baseKey = (n) => n ? norm(baseName(n)) : "";
+function placeResolver() {
+  if (_pres) return _pres;
+  const ev = sortedEvents().filter((e) => !e.move && e.place);
+  const keys = new Map();
+  for (const e of ev) { const k = baseKey(e.place); if (k && !keys.has(k)) keys.set(k, baseName(e.place)); }
+  const hotels = ev.filter((e) => e.type === "hotel" && e.title).map((e) => [norm(e.title), baseKey(e.place)]);
+  const words = (x) => " " + x.replace(/[^a-z0-9]+/g, " ").trim() + " ";
+  const res = (n) => {
+    const k = baseKey(n); if (!k) return "";
+    if (keys.has(k)) return k;
+    const nn = norm(n);
+    for (const [t, pk] of hotels) if (pk && nn.length >= 6 && (t.startsWith(nn) || nn.startsWith(t))) return pk;
+    const w = words(k); let best = "";
+    for (const sk of keys.keys()) if (sk.length >= 4 && w.includes(words(sk)) && sk.length > best.length) best = sk;
+    if (best) return best;
+    for (const sk of keys.keys()) if (k.length >= 4 && words(sk).includes(w)) return sk;
+    return k;
+  };
+  _pres = { res, name: (k, fb) => keys.get(k) || fb };
+  return _pres;
+}
+const legKey = (n) => n ? placeResolver().res(n) : "";
 function journeys() {
   const ev = sortedEvents(), stays = ev.filter((e) => !e.move), out = [];
+  const byDay = new Map();
+  for (const e of ev.filter((x) => x.move)) { if (!byDay.has(e.sdate)) byDay.set(e.sdate, []); byDay.get(e.sdate).push(e); }
+  const legs = [];
+  for (const [, day] of [...byDay].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+    const rest = day.slice();
+    while (rest.length) {
+      // zuerst eine Fahrt, die nicht dort beginnt, wo eine andere dieses Tages ankommt; dann ihr nach
+      let i = rest.findIndex((e) => !rest.some((o) => o !== e && legKey(o.to) && legKey(o.to) === legKey(e.from)));
+      if (i < 0) i = 0;
+      let e = rest.splice(i, 1)[0]; legs.push(e);
+      for (;;) { const j = rest.findIndex((o) => legKey(o.from) && legKey(o.from) === legKey(e.to)); if (j < 0) break; e = rest.splice(j, 1)[0]; legs.push(e); }
+    }
+  }
   let cur = null;
-  for (const e of ev.filter((x) => x.move)) {
+  for (const e of legs) {
     if (cur) {
-      const last = cur.legs[cur.legs.length - 1], k = legKey(last.to), arr = last.end || last.start;
+      const last = cur.legs[cur.legs.length - 1], k = legKey(last.to), arr = Math.max(last.end || 0, last.start);
       const arrDay = last.end ? localDateIn(last.end, last.endTz) : (last.edate || last.sdate);
       const soon = e.noTime || last.noTime ? e.sdate === arrDay : (e.start >= arr - 36e5 && e.start - arr <= 20 * 36e5);   // ohne Uhrzeit: gleicher Tag
       const ok = k && legKey(e.from) === k && soon
@@ -1168,7 +1216,7 @@ function journeys() {
     j.arr = z.end ? localDateIn(z.end, z.endTz) : (z.edate || z.sdate);
     j.fk = moveSides(a)[0]; j.tk = moveSides(z)[1];
     j.border = phases().length > 0 && j.fk !== j.tk;
-    j.via = j.legs.slice(0, -1).map((l) => l.to).filter(Boolean);
+    j.via = [...new Set(j.legs.slice(0, -1).map((l) => l.to).filter((t) => t && legKey(t) !== legKey(j.to)).map((t) => placeResolver().name(legKey(t), baseName(t))))];
     j.round = !j.border && !!legKey(j.from) && legKey(j.from) === legKey(j.to);   // Ausflug hin und zurück bleibt beim Ort
   }
   return out;
@@ -1176,7 +1224,7 @@ function journeys() {
 function stations() {
   const byKey = new Map(), list = [], border = [], hops = [];
   const get = (name) => {
-    const nm = stationName(name), k = norm(nm);
+    const k = legKey(name), nm = placeResolver().name(k, baseName(name));
     if (!byKey.has(k)) { const c = findCity(nm); const st = { key: k, name: nm, country: c ? c.country : null, events: [] }; byKey.set(k, st); list.push(st); }
     return byKey.get(k);
   };
@@ -2135,16 +2183,24 @@ function packListHtml() {
   const people = who !== "all" ? [] : travelers().map((n, i) => { const its = packItems.filter((p) => checkKeys(p).includes(String(i))); return its.length ? `${esc(n)} ${its.filter((p) => (p.packed || {})[String(i)]).length}/${its.length}` : ""; }).filter(Boolean);
   const sharedIts = packItems.filter((p) => p.who === "shared");
   if (sharedIts.length && who === "all") people.push(`gemeinsam ${sharedIts.filter((p) => (p.packed || {}).g).length}/${sharedIts.length}`);
-  const filters = `<div class="seg" role="group" aria-label="Filter"><button type="button" data-pf="all" aria-pressed="${filt === "all"}">Alle</button><button type="button" data-pf="open" aria-pressed="${filt === "open"}">Offen</button><button type="button" data-pf="buy" aria-pressed="${filt === "buy"}">Vor Ort kaufen</button></div>`;
-  const summary = `<div class="summary" style="grid-template-columns:repeat(2,minmax(0,1fr))"><div><b>${done}/${packItems.length}</b><span>gepackt</span></div><div><b>${buyN}</b><span>vor Ort kaufen</span></div></div>`;
+  // Übersicht: ein Fortschrittsbalken, dann jede Kategorie als einklappbares Band; vor Ort Gekauftes pro Land am Schluss
+  const pct = packItems.length ? Math.round(done / packItems.length * 100) : 0;
+  const prog = `<div class="pkprog"><div class="pkbar" aria-hidden="true"><i style="width:${pct}%"></i></div><span><b>${done}</b> von ${packItems.length} gepackt${people.length > 1 ? ` · ${people.join(" · ")}` : ""}</span></div>`;
+  if (!S.pCatOpen) S.pCatOpen = new Set();
+  const band = (key, title, list, isBuy) => {
+    if (!list.length) return "";
+    const d = isBuy ? 0 : list.filter(packedFor).length, all = !isBuy && d === list.length;
+    const sub = isBuy ? `${list.length} ${list.length === 1 ? "Teil" : "Teile"}` : all ? "alles gepackt" : `${list.length - d} offen`;
+    return `<details class="land pkcat ${all ? "alldone" : ""}" data-pcat="${esc(key)}" ${S.pCatOpen.has(key) ? "open" : ""}>
+      <summary class="band"><b>${esc(title)}</b><span class="dt">${isBuy ? "" : `${d}/${list.length}`}</span><span class="chev">${ui("chev")}</span><span class="sub">${all ? `${ui("check", 2)} ` : ""}${sub}</span></summary>
+      <div class="pkcatin">${list.map((p) => itemHtml(p, t, longest, who)).join("")}</div></details>`;
+  };
   let list = "";
-  for (const [ck, cl] of CATS) {
-    const inCat = vis.filter((p) => (p.cat || "sonstiges") === ck);
-    if (!inCat.length) continue;
-    list += `<div class="cat"><p class="label" style="margin:0">${cl}</p><div>${inCat.map((p) => itemHtml(p, t, longest, who)).join("")}</div></div>`;
-  }
+  for (const [ck, cl] of CATS) list += band(ck, cl, packItems.filter((p) => (p.cat || "sonstiges") === ck), false);
+  const buyItems = items.filter((p) => p.mode && p.mode !== "pack" && mine(p));
+  for (const m of [...new Set(buyItems.map((p) => p.mode))]) list += band("buy-" + m, phaseName(m) ? `In ${phaseName(m)} kaufen` : "Vor Ort kaufen", buyItems.filter((p) => p.mode === m), true);
   if (!list) list = `<p class="note">Nichts in dieser Ansicht.</p>`;
-  return personChips + summary + (people.length > 1 ? `<p class="note pkpeople">${people.join(" · ")}</p>` : "") + checkBoxHtml(who, W, filt) + (short ? `<div class="callout"><b>${short} ${short === 1 ? "Teil reicht" : "Teile reichen"} nicht bis zum nächsten Waschtag.</b> Mehr einpacken oder einen Waschtag früher einplanen.</div>` : "") + filters + `<div style="display:grid;gap:22px">${list}</div>`;
+  return personChips + prog + checkBoxHtml(who, W, "all") + `<div class="pkcats">${list}</div>`;
 }
 function itemHtml(p, t, longest, who) {
   const buy = p.mode && p.mode !== "pack";
@@ -2200,6 +2256,7 @@ function bindPack(s) {
   s.querySelectorAll("[data-pedit]").forEach((b) => b.addEventListener("click", () => { if (canEdit()) openPForm(S.packing.find((p) => p.id === b.dataset.pedit)); }));
   const seed = $("seedpk"); if (seed) seed.addEventListener("click", seedPacking);
   s.querySelectorAll("details[data-pland]").forEach((d) => d.addEventListener("toggle", () => { if (d.open) S.pLand = d.dataset.pland; else if (S.pLand === d.dataset.pland) S.pLand = null; }));
+  s.querySelectorAll("details[data-pcat]").forEach((d) => d.addEventListener("toggle", () => { if (d.open) S.pCatOpen.add(d.dataset.pcat); else S.pCatOpen.delete(d.dataset.pcat); }));
   s.querySelectorAll("[data-pp]").forEach((b) => b.addEventListener("click", () => { S.pPerson = b.dataset.pp; S.pOpen = null; renderPacken(); }));
   s.querySelectorAll("[data-popen]").forEach((b) => b.addEventListener("click", () => { S.pOpen = S.pOpen === b.dataset.popen ? null : b.dataset.popen; renderPacken(); }));
   s.querySelectorAll("[data-pedit2]").forEach((b) => b.addEventListener("click", () => { if (canEdit()) openPForm(S.packing.find((p) => p.id === b.dataset.pedit2)); }));
@@ -3151,7 +3208,7 @@ function renderSettings() {
 /* ---------- Tips from friends ---------- */
 const TIPCATS = [["essen", "Essen & Trinken"], ["sehen", "Sehen & Erleben"], ["shopping", "Shopping"], ["ausgehen", "Ausgehen"], ["unterkunft", "Unterkunft"], ["praktisch", "Praktisches"]];
 const TIPCAT = Object.fromEntries(TIPCATS);
-function placeKey(name) { const c = findCity(name); return c ? (c.city || c.name) : String(name || "").trim(); }
+function placeKey(name) { const k = legKey(name); return k ? placeResolver().name(k, baseName(name)) : String(name || "").trim(); }
 function tipsAt(name) { if (!name) return []; const k = norm(placeKey(name)); return S.tips.filter((t) => norm(placeKey(t.city)) === k); }
 function placesIndex() {
   const map = new Map();
@@ -3494,10 +3551,10 @@ document.addEventListener("click", async (ev) => {
   catch { window.open(url, "_blank", "noopener"); }
 }, true);
 
-const APP_VERSION = "32";
+const APP_VERSION = "34";
 /* ---------- Render & boot ---------- */
 function render() {
-  _sorted = null; _conf = null;
+  _sorted = null; _conf = null; _pres = null;
   const wheel = S.view === "trips";
   document.body.classList.toggle("wheelmode", wheel);
   $("s-trips").hidden = !wheel;
