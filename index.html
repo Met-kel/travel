@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="referrer" content="no-referrer">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' blob: data: https://cdn.jsdelivr.net https://*.currency-api.pages.dev https://api.frankfurter.dev; object-src 'none'; base-uri 'self'; form-action 'none'">
-<link rel="manifest" href="manifest.webmanifest?v=37">
+<link rel="manifest" href="manifest.webmanifest?v=39">
 <link rel="icon" href="koffer-192.png">
 <link rel="apple-touch-icon" href="koffer-180.png">
 <title>Reise</title>
@@ -341,6 +341,7 @@ details.kcatg > .rows > li:last-child { border-bottom: 0; }
 .pwrow .eye { position: absolute; right: 0; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; border: 0; background: none; color: var(--muted); cursor: pointer; display: grid; place-items: center; }
 .pwrow .eye svg { width: 20px; height: 20px; }
 .pwrow .eye[aria-pressed="true"] { color: var(--ink); }
+.pwtag { font-weight: 500; letter-spacing: .12em; color: var(--ink); font-variant-numeric: tabular-nums; }
 .kmenu .morerow.danger > span:first-child { color: var(--danger); }
 .namelist { display: grid; border-top: 1px solid var(--line); }
 .nmrow { display: grid; grid-template-columns: 22px minmax(0, 1fr) 32px; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); }
@@ -2862,19 +2863,33 @@ $("lightbox").addEventListener("click", (e) => { if (e.target.id === "lightbox")
 const TE = new TextEncoder(), TD = new TextDecoder();
 function b64(buf) { let s = ""; const b = buf instanceof Uint8Array ? buf : new Uint8Array(buf); for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(s); }
 function unb64(s) { const bin = atob(s); const out = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; }
+// Passwort vereinheitlichen: Leerzeichen am Rand, typografische Anführungszeichen und Striche (iPhone) zählen nicht
+function normPw(pw) { return String(pw || "").normalize("NFC").replace(/[\u2018\u2019\u201A\u2032]/g, "'").replace(/[\u201C\u201D\u201E\u2033]/g, '"').replace(/[\u2013\u2014]/g, "-").replace(/\u00A0/g, " ").trim(); }
+// Varianten fürs Entschlüsseln: vereinheitlicht, wie eingetippt, erster Buchstabe gross/klein vertauscht (Auto-Grossschreibung)
+function pwVariants(pw) {
+  const n = normPw(pw), out = [n, String(pw || "")];
+  if (n) out.push((n[0] === n[0].toUpperCase() ? n[0].toLowerCase() : n[0].toUpperCase()) + n.slice(1));
+  return [...new Set(out)].filter(Boolean);
+}
+async function withPw(pw, fn) { let err; for (const v of pwVariants(pw)) { try { return await fn(v); } catch (e) { err = e; } } throw err; }
+// Kennung: 4 Zeichen aus dem Passwort, auf beiden Handys gleich, wenn das Passwort gleich ist (verrät das Passwort nicht)
+async function pwTag(pw) {
+  const n = normPw(pw); if (n.length < 8) return "";
+  const h = new Uint8Array(await crypto.subtle.digest("SHA-256", TE.encode("reise-kennung:" + n)));
+  const A = "ACDEFHJKLMNPRTUVWXY34679"; return [...h.slice(0, 4)].map((x) => A[x % A.length]).join("");
+}
 async function deriveKey(pw, salt, iter) {
   const base = await crypto.subtle.importKey("raw", TE.encode(pw), "PBKDF2", false, ["deriveKey"]);
   return crypto.subtle.deriveKey({ name: "PBKDF2", salt, iterations: iter, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
 }
 async function encryptJson(obj, pw) {
   const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12)), iter = 310000;
-  const key = await deriveKey(pw, salt, iter);
+  const key = await deriveKey(normPw(pw), salt, iter);
   const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, TE.encode(JSON.stringify(obj)));
-  return { format: "reise-verschluesselt", v: 1, kdf: "PBKDF2-SHA256", iter, salt: b64(salt), iv: b64(iv), data: b64(ct) };
+  return { format: "reise-verschluesselt", v: 1, kdf: "PBKDF2-SHA256", iter, tag: await pwTag(pw), salt: b64(salt), iv: b64(iv), data: b64(ct) };
 }
 async function decryptJson(w, pw) {
-  const key = await deriveKey(pw, unb64(w.salt), w.iter || 310000);
-  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(w.iv) }, key, unb64(w.data));
+  const pt = await withPw(pw, async (p) => crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(w.iv) }, await deriveKey(p, unb64(w.salt), w.iter || 310000), unb64(w.data)));
   return JSON.parse(TD.decode(pt));
 }
 const PRIVATE_COLLS = new Set(["kasse", "expenses"]);
@@ -3007,7 +3022,7 @@ async function exportTripFile(btn) {
     for (const [pl, name] of list) files.push(new File([JSON.stringify(await encryptJson(pl, pw))], name + ".txt", { type: "text/plain" }));
     await shareOrDownloadMany(files);
     setPref("lastExport", String(Date.now()));
-    toast(files.length > 1 ? `${files.length} Dateien erstellt: Reise und Tickets` : "Reisedatei erstellt");
+    toast((files.length > 1 ? `${files.length} Dateien erstellt` : "Reisedatei erstellt") + ` · Kennung ${await pwTag(pw)}`);
   } catch (e) { if (!(e && e.code === "declined")) toast("Erstellen ging nicht."); }
   finally { btn.disabled = false; btn.textContent = "Alles sichern"; renderSettings(); }
 }
@@ -3024,7 +3039,7 @@ async function loadTripFile(file, status, label) {
     const pw = $("st-pw").value || pref("pw", "");
     if (!pw) { status.textContent = "Diese Datei ist verschlüsselt. Trag oben das Passwort ein und wähle die Datei nochmal."; return null; }
     try { return await decryptJson(obj, pw); }
-    catch { status.innerHTML = `Das Passwort passt nicht zur ${nm}.`; return null; }
+    catch { status.innerHTML = await pwFailText(obj.tag, pw, "Datei"); return null; }
   }
   return obj;
 }
@@ -3048,15 +3063,16 @@ async function packMessage(payload, pw) {
   let raw = TE.encode(JSON.stringify(payload)), z = "0";
   if (HAS_GZ) { raw = await gzBytes(raw, true); z = "1"; }
   const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12)), iter = 310000;
-  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await deriveKey(pw, salt, iter), raw);
-  return `RD${z}.${iter}.${b64(salt)}.${b64(iv)}.${b64(ct)}`;
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await deriveKey(normPw(pw), salt, iter), raw);
+  return `RD${z}.${iter}.${await pwTag(pw)}.${b64(salt)}.${b64(iv)}.${b64(ct)}`;
 }
 async function unpackMessage(text, pw) {
-  const m = /RD([01])\.(\d+)\.([A-Za-z0-9+/=]+)\.([A-Za-z0-9+/=]+)\.([A-Za-z0-9+/=\s]+)/.exec(String(text || ""));
-  if (!m) throw { code: "no_msg" };
+  const x = /RD([01])\.(\d+)\.(?:([A-Z0-9]{4})\.)?([A-Za-z0-9+/=]{20,})\.([A-Za-z0-9+/=]{12,})\.([A-Za-z0-9+/=\s]+)/.exec(String(text || ""));
+  if (!x) throw { code: "no_msg" };
+  const m = [x[0], x[1], x[2], x[4], x[5], x[6]], tag = x[3] || "";
   let pt;
-  try { pt = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(m[4]) }, await deriveKey(pw, unb64(m[3]), +m[2]), unb64(m[5].replace(/\s/g, "")))); }
-  catch { throw { code: "pw" }; }
+  try { pt = new Uint8Array(await withPw(pw, async (p) => crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(m[4]) }, await deriveKey(p, unb64(m[3]), +m[2]), unb64(m[5].replace(/\s/g, ""))))); }
+  catch { throw { code: "pw", tag }; }
   if (m[1] === "1") { if (!HAS_GZ) throw { code: "old" }; pt = await gzBytes(pt, false); }
   return JSON.parse(TD.decode(pt));
 }
@@ -3076,6 +3092,13 @@ async function shareMessage(btn) {
   } catch { toast("Erstellen ging nicht."); }
   finally { btn.disabled = false; }
 }
+// Warum passt es nicht? Mit der Kennung in der Datei lässt sich sagen: anderes Passwort oder beschädigte Datei.
+async function pwFailText(fileTag, pw, what) {
+  const mine = await pwTag(pw);
+  if (fileTag && mine && fileTag !== mine) return `Diese ${what} wurde mit einem anderen Passwort erstellt: Kennung <b class="pwtag">${esc(fileTag)}</b>. Dein Passwort hat Kennung <b class="pwtag">${mine}</b>. Auf dem anderen Handy unter „Sichern und abgleichen“ mit dem Auge nachschauen, welches Passwort dort steht, oder dort mit eurem Passwort neu sichern und nochmals schicken.`;
+  if (fileTag && fileTag === mine) return `Das Passwort stimmt (Kennung <b class="pwtag">${mine}</b>), aber die ${what} ist beschädigt oder unvollständig. Bitte nochmals schicken${what === "Nachricht" ? " und die ganze Nachricht kopieren" : ""}.`;
+  return `Das Passwort passt nicht zu dieser ${what}. Sie ist älter und zeigt ihre Kennung noch nicht. Am einfachsten: auf dem anderen Handy das Passwort mit dem Auge prüfen, neu sichern und nochmals schicken. Dann zeigt die App, ob die Kennung passt.`;
+}
 async function importMessageText(text) {
   const status = $("st-importstatus") || document.createElement("p");
   const pw = ($("st-pw") && $("st-pw").value) || pref("pw", "");
@@ -3083,7 +3106,7 @@ async function importMessageText(text) {
   let payload;
   try { payload = await unpackMessage(text, pw); }
   catch (e) {
-    status.textContent = e && e.code === "pw" ? "Das Passwort passt nicht zu dieser Nachricht." : e && e.code === "old" ? "Dieses Handy ist zu alt für gepackte Nachrichten. Bitte die Datei nehmen." : "Darin sind keine Reise-Daten. Die ganze Nachricht kopieren, auch den Teil mit „RD1.“.";
+    status.innerHTML = e && e.code === "pw" ? await pwFailText(e.tag, pw, "Nachricht") : e && e.code === "old" ? "Dieses Handy ist zu alt für gepackte Nachrichten. Bitte die Datei nehmen." : "Darin sind keine Reise-Daten. Die ganze Nachricht kopieren, auch den Teil mit „RD1.“.";
     return false;
   }
   S.fromMessage = true;
@@ -3252,7 +3275,7 @@ function renderSettings() {
     let c = "";
     if (pg === "sync") c = `
       ${app ? `<p class="note">Eine Reisedatei von Person B einlesen. Gehört sie zu einer anderen Reise, fragt die App, wo sie hinsoll.</p>` : `<p class="note">Alles liegt nur auf diesem Handy. „Alles sichern“ macht eine verschlüsselte Reisedatei mit allem: Termine, Tipps, Packliste, Kasse und Tickets. Im Teilen-Menü Proton Drive wählen, in euren gemeinsamen Ordner. Die andere Person wählt bei „Reisedatei einlesen“ die neuesten Dateien. Neues wird zusammengeführt, nichts wird doppelt.</p>`}
-      <div class="field"><label for="st-pw">Passwort für die Reisedatei</label><div class="pwrow"><input id="st-pw" type="${S.pwShow ? "text" : "password"}" autocomplete="new-password" autocapitalize="off" spellcheck="false" value="${esc(S.pwTyped || kept)}" placeholder="mindestens 8 Zeichen, gleich bei euch beiden"><button class="eye" type="button" id="st-eye" aria-label="${S.pwShow ? "Passwort verbergen" : "Passwort zeigen"}" aria-pressed="${!!S.pwShow}">${ui(S.pwShow ? "eyeoff" : "eye")}</button></div></div>
+      <div class="field"><label for="st-pw">Passwort für die Reisedatei</label><div class="pwrow"><input id="st-pw" name="reise-pw" type="${S.pwShow ? "text" : "password"}" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" value="${esc(S.pwTyped || kept)}" placeholder="mindestens 8 Zeichen, gleich bei euch beiden"><button class="eye" type="button" id="st-eye" aria-label="${S.pwShow ? "Passwort verbergen" : "Passwort zeigen"}" aria-pressed="${!!S.pwShow}">${ui(S.pwShow ? "eyeoff" : "eye")}</button></div><span class="hint" id="st-pwtag"></span></div>
       <label class="check"><input type="checkbox" id="st-pwkeep" ${kept ? "checked" : ""}> Auf diesem Gerät merken</label>
       ${app ? "" : `<label class="check"><input type="checkbox" id="st-tickets" checked> Tickets mitsichern</label><p class="note" style="margin-top:-4px">Tickets kommen in kleine Extra-Dateien („… Tickets 1 von 3“), damit Proton Drive sie hergibt. Beim Einlesen alle zusammen wählen. Ohne neue Tickets kannst du das abhaken.</p>`}
       <div class="actions">${app ? "" : `<button class="btn solid" type="button" id="st-export">Alles sichern</button>`}
@@ -3322,7 +3345,9 @@ function renderSettings() {
   }));
   $("st-ksetup")?.addEventListener("click", () => kSettingsSheet(true));
   $("st-kold")?.addEventListener("click", () => $("kold").click());
-  $("st-pw")?.addEventListener("input", (e) => { S.pwTyped = e.target.value; });
+  const showTag = async () => { const el = $("st-pwtag"), v = $("st-pw") && $("st-pw").value; if (!el) return; const t = await pwTag(v); el.innerHTML = t ? `Kennung <b class="pwtag">${t}</b> · muss auf beiden Handys gleich sein` : (v ? "mindestens 8 Zeichen" : ""); };
+  $("st-pw")?.addEventListener("input", (e) => { S.pwTyped = e.target.value; showTag(); });
+  showTag();
   $("st-export")?.addEventListener("click", (e) => exportTripFile(e.currentTarget));
   $("st-msg")?.addEventListener("click", (e) => shareMessage(e.currentTarget));
   $("st-eye")?.addEventListener("click", () => {
@@ -3720,7 +3745,7 @@ document.addEventListener("click", async (ev) => {
   catch { window.open(url, "_blank", "noopener"); }
 }, true);
 
-const APP_VERSION = "37";
+const APP_VERSION = "39";
 /* ---------- Render & boot ---------- */
 function render() {
   _sorted = null; _conf = null; _pres = null;
