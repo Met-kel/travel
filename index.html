@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="referrer" content="no-referrer">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' blob: data: https://cdn.jsdelivr.net https://*.currency-api.pages.dev https://api.frankfurter.dev; object-src 'none'; base-uri 'self'; form-action 'none'">
-<link rel="manifest" href="manifest.webmanifest?v=34">
+<link rel="manifest" href="manifest.webmanifest?v=35">
 <link rel="icon" href="koffer-192.png">
 <link rel="apple-touch-icon" href="koffer-180.png">
 <title>Reise</title>
@@ -506,6 +506,19 @@ label.btn { cursor: pointer; }
 .stop:has(+ .hop)::after, .stop:has(+ .hopw)::after { bottom: 0; }
 .hopw.open > .hop .chev { transform: rotate(90deg); }
 .hoplegs { margin: 0 0 6px 26px; border-top: 1px solid var(--line); }
+.hop.gap .ht { color: var(--wood); display: grid; gap: 1px; }
+.hop.gap .hl svg { color: var(--wood); width: 16px; height: 16px; }
+.hop .gsub { font-size: 12px; color: var(--muted); letter-spacing: 0; }
+.stays { display: grid; gap: 6px; margin: 4px 0 8px; }
+.stay { display: grid; grid-template-columns: 22px minmax(0, 1fr) 16px; gap: 12px; align-items: center; width: 100%; text-align: left; background: var(--sunk); border: 0; border-radius: 8px; padding: 12px 12px; cursor: pointer; color: var(--ink); }
+.stay .si svg { width: 20px; height: 20px; color: var(--muted); }
+.stay .sm { display: grid; gap: 2px; min-width: 0; }
+.stay .sm b { font-weight: 500; overflow-wrap: anywhere; }
+.stay .sm > span { font-size: 12px; color: var(--muted); }
+.stay .chev svg { width: 14px; height: 14px; color: var(--muted); }
+.stay.open { background: transparent; border: 1px dashed var(--wood); }
+.stay.open b, .stay.open .si svg { color: var(--wood); }
+.stay.tent { border: 1px dashed var(--line-strong); }
 .stations .station.stop { border: 0; position: relative; }
 .stop > .sthead { border-bottom: 1px solid var(--line); }
 .stop[open] > .sthead { border-bottom: 0; }
@@ -621,6 +634,7 @@ ul.steps { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--
       <div class="field wide" data-step="rest"><label for="f-title">Titel</label><input id="f-title" autocomplete="off" placeholder="z. B. Zug nach Lyon"></div>
       <div class="field" data-for="move" data-step="where"><label for="f-from">Von</label><input id="f-from" list="citylist" autocomplete="off" placeholder="Stadt oder Flughafen"></div>
       <div class="field" data-for="move" data-step="where"><label for="f-to">Nach</label><input id="f-to" list="citylist" autocomplete="off" placeholder="Stadt oder Flughafen"></div>
+      <div class="field wide" data-for="move" data-step="rest"><label for="f-stop">Am Ziel</label><select id="f-stop"><option value="">Automatisch erkennen</option><option value="transit">Nur Umstieg, es geht gleich weiter</option><option value="stay">Aufenthalt, hier bleiben wir</option></select></div>
       <div class="field wide" data-for="stay" data-step="where"><label for="f-place">Ort</label><input id="f-place" list="citylist" autocomplete="off" placeholder="z. B. Lyon"></div>
       <div class="field wide" data-step="where" id="f-sugg" hidden></div>
       <div class="field wide" data-for="hotel" data-step="rest"><label for="f-laundry">Wäsche</label><select id="f-laundry"><option value="">Keine Angabe</option><option value="hotel">Waschmaschine im Hotel</option><option value="near">Waschsalon in der Nähe</option><option value="service">Wäscheservice im Hotel</option></select></div>
@@ -1074,12 +1088,12 @@ function renderHeute() {
   let prepHtml = "";
   if (before) {
     const open = S.packing.filter((p) => p.mode === "pack" || !p.mode).filter((p) => !isPacked(p)).length;
-    const missing = evs.filter(isOpen).length;
+    const missing = evs.filter(isOpen).length + planGaps().count;
     const lastEx = +pref("lastExport", "0");
     const d = dayNumber(S.trip.start) - dayNumber(td);
     prepHtml = `<div><p class="label">Vor der Abreise</p><div class="kmenu">
       <button class="morerow" type="button" id="hp-pack"><span>Packliste</span><span>${!S.packing.length ? "noch leer" : open ? `${open} offen` : "alles gepackt"}${ui("chev")}</span></button>
-      <button class="morerow" type="button" id="hp-open"><span>Termine mit offenen Details</span><span>${missing || "keine"}${ui("chev")}</span></button>
+      <button class="morerow" type="button" id="hp-open"><span>Noch zu buchen</span><span>${missing || "keine"}${ui("chev")}</span></button>
       <button class="morerow" type="button" id="hp-save"><span>Zuletzt gesichert</span><span>${lastEx ? kSince(lastEx) : "noch nie"}${ui("chev")}</span></button>
     </div></div>`;
   }
@@ -1122,7 +1136,7 @@ function tickCountdown() {
 /* Reise */
 function rowHtml(e, now, withDay) {
   const past = isPast(e, now);
-  const flag = e.tentative ? "Vorschlag" : e.placeholder ? "Details fehlen" : (e.noTime && e.type !== "hotel" && e.type !== "laundry" ? "Uhrzeit fehlt" : (e.move && !(e.attachments || []).length ? "kein Ticket" : ""));
+  const flag = e.tentative ? "Vorschlag" : e.placeholder ? "Details fehlen" : "";
   const cf = conflicts().get(e.id), cw = cf && (cf.mark || S.rFilter === "dup");
   return `<li><button class="row ${past ? "past" : ""}" type="button" data-open="${esc(e.id)}">
     <span class="t ${e.stime ? "" : "none"}">${withDay ? `${fmtDay(e.sdate).wd} ${fmtDay(e.sdate).d}.<br>` : ""}${e.stime ? esc(e.stime) : "–"}</span>
@@ -1134,7 +1148,39 @@ function bindRows(root) {
   root.querySelectorAll("[data-open]").forEach((b) => b.addEventListener("click", () => openDetail(b.dataset.open)));
 }
 const RFILTERS = [["all", "Alle"], ["move", "Unterwegs"], ["hotel", "Unterkünfte"], ["plan", "Ausflüge & Essen"], ["open", "Offen"]];
-function isOpen(e) { if (e.tentative) return false; return !!(e.placeholder || (e.noTime && e.type !== "hotel") || (e.move && !(e.attachments || []).length)); }
+// "Offen" heisst: noch zu buchen. Ein fehlendes Ticket oder eine fehlende Uhrzeit ist kein offener Punkt.
+function isOpen(e) { return !!(e.placeholder || (e.tentative && (e.move || e.type === "hotel"))); }
+// Was fehlt noch: Weiterreisen zwischen zwei Orten ohne Fahrt, Nächte ohne Unterkunft
+function planGaps(sts) {
+  sts = sts || stations();
+  // nur echte Stationen (Anreise oder Unterkunft), keine Orte von Tagesausflügen
+  const real = sts.filter((st) => st.key && st.from && ((st.arr || []).length || st.events.some((e) => e.type === "hotel"))), J = [...(sts.border || []), ...(sts.hops || [])];
+  const reached = (k) => J.some((j) => legKey(j.to) === k);
+  const gaps = [];
+  if (S.trip && phases().length && real.length) {
+    if (!J.some((j) => j.fk === "_home")) gaps.push({ from: null, to: real[0], date: real[0].from, kind: "Anreise", border: true });
+    for (let i = 1; i < real.length; i++) {
+      const A = real[i - 1], B = real[i];
+      if (reached(B.key)) continue;
+      gaps.push({ from: A, to: B, date: B.from, kind: "Weiterreise", border: A.country !== B.country });
+    }
+    if (!J.some((j) => j.tk === "_home")) { const Z = real[real.length - 1]; gaps.push({ from: Z, to: null, date: Z.to, kind: "Rückreise", border: true }); }
+  }
+  const stays = new Map();
+  for (const st of real) {
+    const a = dayNumber(st.from), b = dayNumber(st.to);
+    const hotels = st.events.filter((e) => e.type === "hotel");
+    const miss = [];
+    for (let d = a; d < b; d++) {
+      const ok = hotels.some((h) => dayNumber(h.sdate) <= d && d < dayNumber(h.edate && h.edate > h.sdate ? h.edate : dayStr(dayNumber(h.sdate) + 1)));
+      if (ok) continue;
+      const last = miss[miss.length - 1];
+      if (last && last.to === d) last.to = d + 1; else miss.push({ from: d, to: d + 1 });
+    }
+    if (miss.length) stays.set(st.key, miss.map((m) => ({ from: dayStr(m.from), to: dayStr(m.to), nights: m.to - m.from })));
+  }
+  return { gaps, stays, count: gaps.length + [...stays.values()].reduce((n, x) => n + x.length, 0) };
+}
 function matchFilter(e, f) {
   if (f === "dup") return conflicts().has(e.id);
   if (f === "move") return e.move;
@@ -1204,8 +1250,8 @@ function journeys() {
       const last = cur.legs[cur.legs.length - 1], k = legKey(last.to), arr = Math.max(last.end || 0, last.start);
       const arrDay = last.end ? localDateIn(last.end, last.endTz) : (last.edate || last.sdate);
       const soon = e.noTime || last.noTime ? e.sdate === arrDay : (e.start >= arr - 36e5 && e.start - arr <= 20 * 36e5);   // ohne Uhrzeit: gleicher Tag
-      const ok = k && legKey(e.from) === k && soon
-        && !stays.some((x) => legKey(x.place) === k && x.start < e.start && (x.end || x.start) >= arr);
+      const ok = last.stopover === "transit" ? true : last.stopover === "stay" ? false
+        : k && legKey(e.from) === k && soon && !stays.some((x) => legKey(x.place) === k && x.start < e.start && (x.end || x.start) >= arr);
       if (ok) { cur.legs.push(e); continue; }
     }
     cur = { legs: [e] }; out.push(cur);
@@ -1244,11 +1290,8 @@ function stations() {
   }
   // at each place, the journey there comes first on its day (a hotel check-in "from 15:00" is never before the arrival)
   const arrDate = (e) => e.end ? localDateIn(e.end, e.endTz) : (e.edate || e.sdate);
-  for (const st of list) {
-    const isArr = (e) => e.move && e.to && norm(stationName(e.to)) === st.key;
-    const key = (e) => isArr(e) ? [arrDate(e), 0, e.end || e.start] : [e.sdate, 1, e.start];
-    st.events.sort((x, y) => { const A = key(x), B = key(y); return A[0] < B[0] ? -1 : A[0] > B[0] ? 1 : (A[1] - B[1]) || (A[2] - B[2]); });
-  }
+  // Fahrten stehen nicht mehr beim Ort (ausser Ausflügen hin und zurück), also einfach nach Zeit
+  for (const st of list) st.events.sort((x, y) => x.start - y.start);
   const span = (st) => {
     const ds = [...st.events.flatMap((e) => [e.sdate, e.edate || e.sdate]), ...(st.arr || []).map((j) => j.arr), ...(st.dep || []).map((j) => j.sdate)].filter(Boolean).sort();
     st.from = ds[0]; st.to = ds[ds.length - 1];
@@ -1338,7 +1381,7 @@ function renderReise() {
     const jm = (j) => j.legs.some((e) => matchFilter(e, S.rFilter));
     const hops = (sts.border || []).filter(jm), inner = (sts.hops || []).filter(jm), used = new Set();
     if (!S.hopOpen) S.hopOpen = new Set();
-    const legFlag = (e) => e.tentative ? "Vorschlag" : e.placeholder ? "Details fehlen" : e.noTime ? "Uhrzeit fehlt" : !(e.attachments || []).length ? "kein Ticket" : "";
+    const legFlag = (e) => e.tentative ? "Vorschlag" : e.placeholder ? "Details fehlen" : "";
     const hopHtml = (j) => {
       const lbl = j.border ? (j.fk === "_home" ? "Anreise" : j.tk === "_home" ? "Rückreise" : "Weiterreise") : "Weiterreise";
       const many = j.legs.length > 1, open = many && S.hopOpen.has(j.id);
@@ -1350,13 +1393,17 @@ function renderReise() {
       return many ? `<div class="hopw ${open ? "open" : ""}">${btn}${open ? `<ul class="rows hoplegs">${j.legs.map((e) => rowHtml(e, now, true)).join("")}</ul>` : ""}</div>` : btn;
     };
     const hopsBefore = (key) => hops.filter((j) => !used.has(j.id) && j.tk === key).map((j) => { used.add(j.id); return hopHtml(j); }).join("");
+    const G = planGaps(sts), showGaps = S.rFilter === "all" || S.rFilter === "open" || S.rFilter === "move";
+    const gapHtml = (g) => `<button class="hop gap" type="button" data-gap="${esc(JSON.stringify({ from: g.from ? g.from.name : "", to: g.to ? g.to.name : "", d: g.date || "" }))}" aria-label="${g.kind} noch offen"><span class="hl">${ui("plus", 1.6)}</span><span class="ht">${g.kind} noch offen<span class="gsub">${g.from && g.to ? `${esc(g.from.name)} → ${esc(g.to.name)}` : g.to ? `nach ${esc(g.to.name)}` : `ab ${esc(g.from.name)}`}${g.date ? ` · ${fmtShort(g.date)}` : ""}</span></span><span class="chev">${ui("chev")}</span></button>`;
+    const gapsBefore = (key, border) => showGaps ? G.gaps.filter((g) => !g.used && !!g.border === border && (g.to ? g.to.key === key : key === null)).map((g) => { g.used = true; return gapHtml(g); }).join("") : "";
+    const stayOpen = (st) => (G.stays.get(st.key) || []);
     for (const L of lands) {
       const stopsAll = L.sts.map((st) => ({ st, rows: st.events.filter((e) => matchFilter(e, S.rFilter)) }));
-      const stops = stopsAll.filter((x) => x.rows.length || (S.rFilter === "all" && x.st.key));
+      const stops = stopsAll.filter((x) => x.rows.length || (S.rFilter === "all" && x.st.key) || (S.rFilter === "open" && stayOpen(x.st).length) || (showGaps && G.gaps.some((g) => !g.border && g.to && g.to.key === x.st.key)));
       // Fahrten innerhalb dieses Landes: vor dem Zielort, sonst nach der Zeit
       const myHops = inner.filter((j) => !used.has(j.id) && (L.sts.some((st) => st.key && st.key === legKey(j.to)) || (!legKey(j.to) && L.ph && j.sdate >= L.ph.from && j.sdate <= L.ph.to)));
       myHops.forEach((j) => used.add(j.id));
-      if (L.key !== "_none") body += hopsBefore(L.key);
+      if (L.key !== "_none") body += hopsBefore(L.key) + L.sts.map((st) => gapsBefore(st.key, true)).join("");
       if (!stops.length && !myHops.length) continue;
       shown++;
       const nRows = stops.reduce((n, x) => n + x.rows.length, 0);
@@ -1364,31 +1411,39 @@ function renderReise() {
       const from = L.ph ? L.ph.from : stops.map((x) => x.st.from).sort()[0];
       const to = L.ph ? L.ph.to : stops.map((x) => x.st.to).sort().pop();
       const isHereL = L.ph && L.ph.from <= td && td <= L.ph.to;
-      const missL = stops.some(({ st }) => st.key && st.from && st.to && dayNumber(st.to) - dayNumber(st.from) >= 1 && !st.events.some((e) => e.type === "hotel"));
+      const missL = stops.some(({ st }) => stayOpen(st).length);
+      const gapL = G.gaps.some((g) => !g.border && g.to && L.sts.includes(g.to));
       const name = L.ph ? L.ph.name : L.key === "_none" ? "Noch ohne Ort" : "Weitere Orte";
       const confL = stops.some(({ st }) => st.events.some((e) => (conflicts().get(e.id) || {}).mark));
-      const sub = [isHereL ? `<span class="here">Ihr seid hier</span>` : "", places > 1 ? `${places} Orte` : "", `${nRows} ${nRows === 1 ? "Termin" : "Termine"}`, missL ? `<span class="miss">Unterkunft fehlt</span>` : "", confL ? `<span class="miss cwm">${warnI()}prüfen</span>` : ""].filter(Boolean).join(" · ");
+      const sub = [isHereL ? `<span class="here">Ihr seid hier</span>` : "", places > 1 ? `${places} Orte` : "", nRows ? `${nRows} ${nRows === 1 ? "Termin" : "Termine"}` : "", missL ? `<span class="miss">Unterkunft offen</span>` : "", gapL ? `<span class="miss">Weiterreise offen</span>` : "", confL ? `<span class="miss cwm">${warnI()}prüfen</span>` : ""].filter(Boolean).join(" · ");
       const hopFor = (st) => myHops.filter((j) => !j.placed && (legKey(j.to) === st.key || (!legKey(j.to) && j.start < st.first))).map((j) => { j.placed = true; return hopHtml(j); }).join("");
       const stopHtml = stops.map(({ st, rows }) => {
         const sk = st.key || "_none";
         const tipsN = st.key ? tipsAt(st.name).length : 0;
         const nights = st.from && st.to ? dayNumber(st.to) - dayNumber(st.from) : 0;
-        const hasStay = st.events.some((e) => e.type === "hotel");
+        const stayEvs = st.events.filter((e) => e.type === "hotel"), openSt = stayOpen(st);
+        const restRows = rows.filter((e) => e.type !== "hotel");
         const isHere = st.key && st.from <= td && td <= st.to;
         const past = st.to && st.to < td;
         const meta = [
-          rows.length ? `<span>${rows.length} ${rows.length === 1 ? "Termin" : "Termine"}</span>` : "",
+          stayEvs.length ? `<span>${esc(titleOf(stayEvs[0]))}${nights >= 1 ? ` · ${nights} ${nights === 1 ? "Nacht" : "Nächte"}` : ""}</span>` : "",
+          restRows.length ? `<span>${restRows.length} ${restRows.length === 1 ? "Termin" : "Termine"}</span>` : "",
           tipsN ? `<span>${tipsN} ${tipsN === 1 ? "Tipp" : "Tipps"}</span>` : "",
-          st.key && nights >= 1 && !hasStay ? `<span class="miss">Unterkunft fehlt</span>` : "",
+          openSt.length ? `<span class="miss">Unterkunft offen</span>` : "",
           st.events.some((e) => (conflicts().get(e.id) || {}).mark) ? `<span class="miss cwm">${warnI()}prüfen</span>` : ""
         ].filter(Boolean).join("");
-        return hopFor(st) + `<details class="station stop ${isHere ? "now" : ""} ${past ? "past" : ""}" data-st="${esc(sk)}" ${opened.has(sk) ? "open" : ""}>
+        const stayHtml = (S.rFilter === "all" || S.rFilter === "hotel" || S.rFilter === "open" ? stayEvs.filter((e) => S.rFilter !== "open" || isOpen(e)) : []).map((h) => {
+            const n = h.edate && h.edate > h.sdate ? dayNumber(h.edate) - dayNumber(h.sdate) : 0;
+            return `<button class="stay ${isOpen(h) ? "tent" : ""}" type="button" data-open="${esc(h.id)}"><span class="si">${icon("hotel")}</span><span class="sm"><b>${esc(titleOf(h))}${(conflicts().get(h.id) || {}).mark ? ` <span class="cw">${warnI()}</span>` : ""}</b><span>${n ? `${n} ${n === 1 ? "Nacht" : "Nächte"} · ` : ""}${fmtRange(h.sdate, h.edate || h.sdate)}${h.stime ? ` · ab ${esc(h.stime)}` : ""}${isOpen(h) ? ` · <span class="flag">${h.tentative ? "Vorschlag" : "Details fehlen"}</span>` : ""}</span></span><span class="chev">${ui("chev")}</span></button>`;
+          }).join("") + (S.rFilter === "all" || S.rFilter === "hotel" || S.rFilter === "open" ? openSt.map((m) => `<button class="stay open" type="button" data-addstay="${esc(JSON.stringify({ place: st.name, s: m.from, e: m.to }))}"><span class="si">${ui("plus", 1.6)}</span><span class="sm"><b>Unterkunft offen</b><span>${m.nights} ${m.nights === 1 ? "Nacht" : "Nächte"} · ${fmtRange(m.from, m.to)}</span></span><span class="chev">${ui("chev")}</span></button>`).join("") : "");
+        return hopFor(st) + gapsBefore(st.key, false) + `<details class="station stop ${isHere ? "now" : ""} ${past ? "past" : ""}" data-st="${esc(sk)}" ${opened.has(sk) ? "open" : ""}>
           <summary class="sthead">
             <h3>${esc(st.key ? st.name : "Ohne Ort")}</h3><span class="when">${fmtRange(st.from, st.to)}</span><span class="chev">${ui("chev")}</span>
             <span class="meta">${meta}</span>
           </summary>
           <div class="stbody">
-            ${rows.length ? `<ul class="rows">${rows.map((e) => rowHtml(e, now, true)).join("")}</ul>` : ""}
+            ${stayHtml ? `<div class="stays">${stayHtml}</div>` : ""}
+            ${restRows.length ? `<ul class="rows">${restRows.map((e) => rowHtml(e, now, true)).join("")}</ul>` : ""}
             ${st.key ? `<button class="morerow" type="button" data-place="${esc(st.name)}"><span>${tipsN ? "Tipps und alles zu " : "Alles zu "}${esc(st.name)}</span><span>${ui("chev")}</span></button>` : ""}
           </div>
         </details>`;
@@ -1398,9 +1453,9 @@ function renderReise() {
         <div class="rail">${stopHtml}</div>
       </details>`;
     }
-    const rest = hops.filter((j) => !used.has(j.id)).map(hopHtml).join("");
+    const rest = hops.filter((j) => !used.has(j.id)).map(hopHtml).join("") + (showGaps ? G.gaps.filter((g) => !g.used).map((g) => { g.used = true; return gapHtml(g); }).join("") : "");
     if (rest) { const i = body.lastIndexOf('<details class="land " data-land="_none"'); body = i >= 0 ? body.slice(0, i) + rest + body.slice(i) : body + rest; }
-    if (!shown && !hops.length && !inner.length) body = `<p class="note">Nichts in dieser Auswahl.</p>`;
+    if (!shown && !hops.length && !inner.length && !(showGaps && G.gaps.length)) body = `<p class="note">Nichts in dieser Auswahl.</p>`;
   }
   const open = S.packing.filter((p) => (!p.mode || p.mode === "pack") && !isPacked(p)).length;
   const packRow = `<button class="morerow" type="button" id="openpack"><span>Packliste</span><span>${S.packing.length ? (open ? `${open} offen` : "alles gepackt") : "noch leer"}${ui("chev")}</span></button>`;
@@ -1408,6 +1463,8 @@ function renderReise() {
   const root = $("reise-list");
   bindRows(root);
   root.querySelectorAll("[data-place]").forEach((b) => b.addEventListener("click", () => openPlace(b.dataset.place)));
+  root.querySelectorAll("[data-gap]").forEach((b) => b.addEventListener("click", () => { if (!canEdit()) return; const g = JSON.parse(b.dataset.gap); openForm(null, { from: g.from, to: g.to, sdate: g.d }); }));
+  root.querySelectorAll("[data-addstay]").forEach((b) => b.addEventListener("click", () => { if (!canEdit()) return; const g = JSON.parse(b.dataset.addstay); openForm(null, { type: "hotel", place: g.place, sdate: g.s, edate: g.e }); }));
   root.querySelectorAll("[data-hop]").forEach((b) => b.addEventListener("click", () => { const k = b.dataset.hop; if (S.hopOpen.has(k)) S.hopOpen.delete(k); else S.hopOpen.add(k); renderReise(); }));
   root.querySelectorAll("details.station").forEach((d) => d.addEventListener("toggle", () => { const set = stOpenSet(); if (d.open) set.add(d.dataset.st); else set.delete(d.dataset.st); }));
   root.querySelectorAll("details.land").forEach((d) => d.addEventListener("toggle", () => { const set = landOpenSet(); if (d.open) set.add(d.dataset.land); else set.delete(d.dataset.land); }));
@@ -1793,7 +1850,7 @@ function openForm(ev, preset) {
   const e = ev || preset || {};
   $("form-title").textContent = ev ? "Termin bearbeiten" : "Neuer Termin";
   const r = $("f-type-" + (e.type || "train")); if (r) r.checked = true;
-  $("f-title").value = e.title || ""; $("f-from").value = e.from || ""; $("f-to").value = e.to || ""; $("f-place").value = e.place || ""; $("f-laundry").value = e.laundry || "";
+  $("f-title").value = e.title || ""; $("f-from").value = e.from || ""; $("f-to").value = e.to || ""; $("f-place").value = e.place || ""; $("f-stop").value = e.stopover || ""; $("f-laundry").value = e.laundry || "";
   $("f-sdate").value = e.sdate || suggestDate(); $("f-stime").value = e.stime || ""; $("f-edate").value = e.edate || ""; $("f-etime").value = e.etime || "";
   fillTzSelect();
   $("f-tz").value = e.tz || ""; $("f-address").value = e.address || ""; $("f-gps").value = e.gps || ""; $("f-booking").value = e.booking || ""; $("f-tentative").checked = !!e.tentative; $("f-links").value = (e.links || []).map((l) => (l.label ? l.label + ": " : "") + l.url).join("\n"); $("f-notes").value = e.notes || "";
@@ -1980,7 +2037,7 @@ $("form").addEventListener("submit", async (ev) => {
     btn.textContent = "Speichere …";
     const doc = {
       type: t, title: $("f-title").value.trim(),
-      from: move ? $("f-from").value.trim() : "", to: move ? $("f-to").value.trim() : "", place: move ? "" : $("f-place").value.trim(), laundry: t === "hotel" ? $("f-laundry").value : "",
+      from: move ? $("f-from").value.trim() : "", to: move ? $("f-to").value.trim() : "", place: move ? "" : $("f-place").value.trim(), laundry: t === "hotel" ? $("f-laundry").value : "", stopover: move ? $("f-stop").value : "",
       sdate, stime: $("f-stime").value, edate, etime: $("f-etime").value, tz: $("f-tz").value,
       address: $("f-address").value.trim(), gps, booking: $("f-booking").value.trim(), links: parseLinks($("f-links").value), notes: $("f-notes").value.trim(),
       attachments: atts, placeholder: false, tentative: $("f-tentative").checked, updatedAt: new Date().toISOString()
@@ -3551,7 +3608,7 @@ document.addEventListener("click", async (ev) => {
   catch { window.open(url, "_blank", "noopener"); }
 }, true);
 
-const APP_VERSION = "34";
+const APP_VERSION = "35";
 /* ---------- Render & boot ---------- */
 function render() {
   _sorted = null; _conf = null; _pres = null;
