@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="referrer" content="no-referrer">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' blob: data: https://cdn.jsdelivr.net https://*.currency-api.pages.dev https://api.frankfurter.dev; object-src 'none'; base-uri 'self'; form-action 'none'">
-<link rel="manifest" href="manifest.webmanifest?v=36">
+<link rel="manifest" href="manifest.webmanifest?v=37">
 <link rel="icon" href="koffer-192.png">
 <link rel="apple-touch-icon" href="koffer-180.png">
 <title>Reise</title>
@@ -336,6 +336,11 @@ details.kcatg > .rows > li:last-child { border-bottom: 0; }
 .kmenu { display: grid; }
 .kmenu .morerow + .morerow, .kmenu details + .morerow { border-top: 0; }
 .kmenu .morerow[disabled] { opacity: .45; cursor: default; }
+.pwrow { position: relative; }
+.pwrow input { padding-right: 44px; width: 100%; box-sizing: border-box; }
+.pwrow .eye { position: absolute; right: 0; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; border: 0; background: none; color: var(--muted); cursor: pointer; display: grid; place-items: center; }
+.pwrow .eye svg { width: 20px; height: 20px; }
+.pwrow .eye[aria-pressed="true"] { color: var(--ink); }
 .kmenu .morerow.danger > span:first-child { color: var(--danger); }
 .namelist { display: grid; border-top: 1px solid var(--line); }
 .nmrow { display: grid; grid-template-columns: 22px minmax(0, 1fr) 32px; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); }
@@ -782,6 +787,8 @@ const UI = {
   ticket: P("M3.5 8a2 2 0 0 0 2-2h13a2 2 0 0 0 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 0-2 2h-13a2 2 0 0 0-2-2v-2a2 2 0 0 0 0-4z"),
   check: P("M5 12.5l4.5 4.5L19 7.5"),
   ext: P("M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"),
+  eye: P("M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12z") + '<circle cx="12" cy="12" r="2.8"/>',
+  eyeoff: P("M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12z") + '<circle cx="12" cy="12" r="2.8"/>' + P("M4 20 20 4"),
   warn: P("M12 4.5 21 19.5H3z") + P("M12 10v4.2") + '<circle cx="12" cy="16.9" r=".5" fill="currentColor"/>'
 };
 const svgI = (inner, w = 1.4) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
@@ -3034,6 +3041,79 @@ function assemblePieces(p) {
   }
   p.pieces = rest;
 }
+/* ---------- Reise als WhatsApp-Nachricht (ohne Tickets): gezippt, verschlüsselt, als Text ---------- */
+const HAS_GZ = typeof CompressionStream !== "undefined" && typeof DecompressionStream !== "undefined";
+async function gzBytes(bytes, pack) { const st = new Blob([bytes]).stream().pipeThrough(pack ? new CompressionStream("gzip") : new DecompressionStream("gzip")); return new Uint8Array(await new Response(st).arrayBuffer()); }
+async function packMessage(payload, pw) {
+  let raw = TE.encode(JSON.stringify(payload)), z = "0";
+  if (HAS_GZ) { raw = await gzBytes(raw, true); z = "1"; }
+  const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12)), iter = 310000;
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await deriveKey(pw, salt, iter), raw);
+  return `RD${z}.${iter}.${b64(salt)}.${b64(iv)}.${b64(ct)}`;
+}
+async function unpackMessage(text, pw) {
+  const m = /RD([01])\.(\d+)\.([A-Za-z0-9+/=]+)\.([A-Za-z0-9+/=]+)\.([A-Za-z0-9+/=\s]+)/.exec(String(text || ""));
+  if (!m) throw { code: "no_msg" };
+  let pt;
+  try { pt = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(m[4]) }, await deriveKey(pw, unb64(m[3]), +m[2]), unb64(m[5].replace(/\s/g, "")))); }
+  catch { throw { code: "pw" }; }
+  if (m[1] === "1") { if (!HAS_GZ) throw { code: "old" }; pt = await gzBytes(pt, false); }
+  return JSON.parse(TD.decode(pt));
+}
+async function shareMessage(btn) {
+  const pw = $("st-pw").value;
+  if (pw.length < 8) { toast("Bitte ein Passwort mit mindestens 8 Zeichen eintragen."); $("st-pw").focus(); return; }
+  if ($("st-pwkeep").checked) setPref("pw", pw); else setPref("pw", "");
+  btn.disabled = true;
+  try {
+    const code = await packMessage(await buildPayload(false), pw);
+    if (code.length > 60000) { toast("Zu gross für eine Nachricht. Bitte „Alles sichern“ als Datei nehmen."); return; }
+    const text = `Reise-Daten für die Reise-App. Nachricht kopieren, dann in der App: Einstellungen → Sichern und abgleichen → „Aus Nachricht einfügen“.\n\n${code}`;
+    let done = false;
+    if (navigator.share) { try { await navigator.share({ text }); done = true; } catch (e) { if (e && e.name === "AbortError") return; } }
+    if (!done) { await navigator.clipboard.writeText(text); toast("Kopiert. In WhatsApp einfügen und senden."); }
+    setPref("lastExport", String(Date.now()));
+  } catch { toast("Erstellen ging nicht."); }
+  finally { btn.disabled = false; }
+}
+async function importMessageText(text) {
+  const status = $("st-importstatus") || document.createElement("p");
+  const pw = ($("st-pw") && $("st-pw").value) || pref("pw", "");
+  if (!pw) { status.textContent = "Trag oben das Passwort ein, dann nochmals einfügen."; return false; }
+  let payload;
+  try { payload = await unpackMessage(text, pw); }
+  catch (e) {
+    status.textContent = e && e.code === "pw" ? "Das Passwort passt nicht zu dieser Nachricht." : e && e.code === "old" ? "Dieses Handy ist zu alt für gepackte Nachrichten. Bitte die Datei nehmen." : "Darin sind keine Reise-Daten. Die ganze Nachricht kopieren, auch den Teil mit „RD1.“.";
+    return false;
+  }
+  S.fromMessage = true;
+  await importTripFile([new File([JSON.stringify(payload)], "Nachricht.json", { type: "application/json" })]);
+  return true;
+}
+// Android: über "Teilen → Reise" geschickte Dateien oder Nachrichten (vom Service Worker zwischengespeichert)
+async function takeShared() {
+  if (!/[?&]shared=1/.test(location.search)) return;
+  history.replaceState(null, "", location.pathname);
+  let c; try { c = await caches.open("reise-share"); } catch { return; }
+  const files = []; let text = "";
+  for (const k of await c.keys()) {
+    const r = await c.match(k);
+    if (r) { if (k.url.endsWith("/shared/text")) text = await r.text(); else files.push(new File([await r.blob()], decodeURIComponent(r.headers.get("x-name") || "Reisedatei.txt"))); }
+    await c.delete(k);
+  }
+  if (!files.length && !text) return;
+  S.pendingShare = { files, text };
+  openSettings("trip", "sync");
+  let plain = false;
+  if (files.length) { try { plain = !/reise-verschluesselt/.test(await files[0].slice(0, 200).text()); } catch {} }
+  if (pref("pw", "") || plain) runPendingShare();
+  else { const st = $("st-importstatus"); if (st) st.textContent = "Geteilte Reise-Daten sind da. Passwort eintragen und auf „Geteilte Daten einlesen“ tippen."; }
+}
+async function runPendingShare() {
+  const p = S.pendingShare; if (!p) return;
+  S.pendingShare = null; renderSettings();
+  if (p.files.length) await importTripFile(p.files); else await importMessageText(p.text);
+}
 async function importTripFile(fileList) {
   const status = $("st-importstatus") || document.createElement("p");
   const files = [...(fileList.length != null ? fileList : [fileList])].sort((a, b) => a.name.localeCompare(b.name, "de", { numeric: true }));
@@ -3081,6 +3161,7 @@ async function importPayload(payload, status, mb) {
     let msg = `Eingelesen: ${r.added} neu, ${r.updated} aktualisiert${r.files ? `, ${r.files} ${r.files === 1 ? "Ticket" : "Tickets"}` : ""}.`;
     if (r.badFiles) msg += r.storageFull ? ` ${r.badFiles} Tickets passten nicht mehr in den Speicher des Handys.` : ` ${r.badFiles} Tickets in der Datei sind beschädigt und fehlen.`;
     if (!r.added && !r.updated && !r.files) msg = r.pieces ? "Teil eines grossen Tickets gespeichert." : "Alles in dieser Datei ist schon auf dem Handy, nichts Neues.";
+    if (S.fromMessage) { S.fromMessage = false; msg += " Die Nachricht in WhatsApp kannst du jetzt löschen."; }
     await new Promise((r) => setTimeout(r, 50));
     const miss = new Set(S.events.flatMap((e) => (e.attachments || []).map((a) => a.id)).filter((id) => !BLOBURL.has(id))).size;
     if (miss) msg += ` ${miss} ${miss === 1 ? "Ticket fehlt" : "Tickets fehlen"} noch auf diesem Handy: die Ticket-Dateien („… Tickets 1 von …“) auch einlesen.`;
@@ -3171,11 +3252,14 @@ function renderSettings() {
     let c = "";
     if (pg === "sync") c = `
       ${app ? `<p class="note">Eine Reisedatei von Person B einlesen. Gehört sie zu einer anderen Reise, fragt die App, wo sie hinsoll.</p>` : `<p class="note">Alles liegt nur auf diesem Handy. „Alles sichern“ macht eine verschlüsselte Reisedatei mit allem: Termine, Tipps, Packliste, Kasse und Tickets. Im Teilen-Menü Proton Drive wählen, in euren gemeinsamen Ordner. Die andere Person wählt bei „Reisedatei einlesen“ die neuesten Dateien. Neues wird zusammengeführt, nichts wird doppelt.</p>`}
-      <div class="field"><label for="st-pw">Passwort für die Reisedatei</label><input id="st-pw" type="password" autocomplete="new-password" value="${esc(S.pwTyped || kept)}" placeholder="mindestens 8 Zeichen, gleich bei euch beiden"></div>
+      <div class="field"><label for="st-pw">Passwort für die Reisedatei</label><div class="pwrow"><input id="st-pw" type="${S.pwShow ? "text" : "password"}" autocomplete="new-password" autocapitalize="off" spellcheck="false" value="${esc(S.pwTyped || kept)}" placeholder="mindestens 8 Zeichen, gleich bei euch beiden"><button class="eye" type="button" id="st-eye" aria-label="${S.pwShow ? "Passwort verbergen" : "Passwort zeigen"}" aria-pressed="${!!S.pwShow}">${ui(S.pwShow ? "eyeoff" : "eye")}</button></div></div>
       <label class="check"><input type="checkbox" id="st-pwkeep" ${kept ? "checked" : ""}> Auf diesem Gerät merken</label>
       ${app ? "" : `<label class="check"><input type="checkbox" id="st-tickets" checked> Tickets mitsichern</label><p class="note" style="margin-top:-4px">Tickets kommen in kleine Extra-Dateien („… Tickets 1 von 3“), damit Proton Drive sie hergibt. Beim Einlesen alle zusammen wählen. Ohne neue Tickets kannst du das abhaken.</p>`}
       <div class="actions">${app ? "" : `<button class="btn solid" type="button" id="st-export">Alles sichern</button>`}
         <label class="btn${app ? " solid" : ""}" for="st-import">Reisedatei einlesen</label><input id="st-import" type="file" accept=".txt,.json,text/plain,application/json" multiple hidden></div>
+      <div class="actions">${app ? "" : `<button class="btn" type="button" id="st-msg">Als Nachricht teilen</button>`}<button class="btn" type="button" id="st-paste">Aus Nachricht einfügen</button>${S.pendingShare ? `<button class="btn solid" type="button" id="st-pendgo">Geteilte Daten einlesen</button>` : ""}</div>
+      <div class="field wide" id="st-pastebox" hidden><label for="st-pastetext">Nachricht einfügen</label><textarea id="st-pastetext" rows="3" placeholder="Lange tippen und „Einsetzen“"></textarea><div class="actions" style="margin-top:8px"><button class="btn solid" type="button" id="st-pastego">Einlesen</button></div></div>
+      ${app ? "" : `<p class="note" style="margin:0">„Als Nachricht teilen“ schickt alles ausser den Tickets als verschlüsselten Text, z. B. per WhatsApp. Die andere Person kopiert die Nachricht und tippt in der App auf „Aus Nachricht einfügen“.</p>`}
       <p class="note" id="st-importstatus" aria-live="polite">${lastEx ? `Zuletzt gesichert: ${fmtWhen(lastEx)}. ` : ""}${lastIm ? `Zuletzt eingelesen: ${fmtWhen(lastIm)}.` : ""}</p>`;
     else if (pg === "kasse") c = S.kasse ? `
       <div class="kmenu">
@@ -3240,6 +3324,20 @@ function renderSettings() {
   $("st-kold")?.addEventListener("click", () => $("kold").click());
   $("st-pw")?.addEventListener("input", (e) => { S.pwTyped = e.target.value; });
   $("st-export")?.addEventListener("click", (e) => exportTripFile(e.currentTarget));
+  $("st-msg")?.addEventListener("click", (e) => shareMessage(e.currentTarget));
+  $("st-eye")?.addEventListener("click", () => {
+    S.pwShow = !S.pwShow; const i = $("st-pw"), b = $("st-eye");
+    i.type = S.pwShow ? "text" : "password"; b.innerHTML = ui(S.pwShow ? "eyeoff" : "eye");
+    b.setAttribute("aria-pressed", String(S.pwShow)); b.setAttribute("aria-label", S.pwShow ? "Passwort verbergen" : "Passwort zeigen");
+  });
+  $("st-pendgo")?.addEventListener("click", runPendingShare);
+  $("st-paste")?.addEventListener("click", async () => {
+    let t = "";
+    try { t = await navigator.clipboard.readText(); } catch {}
+    if (t && /RD[01]\./.test(t)) { await importMessageText(t); return; }
+    const box = $("st-pastebox"); box.hidden = false; $("st-pastetext").focus();
+  });
+  $("st-pastego")?.addEventListener("click", async () => { if (await importMessageText($("st-pastetext").value)) $("st-pastetext").value = ""; });
   $("st-import")?.addEventListener("change", (e) => { const f = [...e.target.files]; e.target.value = ""; if (f.length) importTripFile(f); });
   $("st-ics")?.addEventListener("click", exportIcs);
   $("st-offline")?.addEventListener("click", (e) => exportOffline(e.currentTarget));
@@ -3622,7 +3720,7 @@ document.addEventListener("click", async (ev) => {
   catch { window.open(url, "_blank", "noopener"); }
 }, true);
 
-const APP_VERSION = "36";
+const APP_VERSION = "37";
 /* ---------- Render & boot ---------- */
 function render() {
   _sorted = null; _conf = null; _pres = null;
@@ -4601,7 +4699,7 @@ render();
 setInterval(tickCountdown, 30000);
 setInterval(rerender, 300000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) rerender(); });
-loadAll().then(() => { S.loaded = true; S.live = true; emit(); }).catch(() => { S.loaded = true; S.loadError = true; render(); });
+loadAll().then(() => { S.loaded = true; S.live = true; emit(); takeShared(); }).catch(() => { S.loaded = true; S.loadError = true; render(); });
 if ("serviceWorker" in navigator && (location.protocol === "https:" || /^(localhost|127\.0\.0\.1)$/.test(location.hostname))) {
   const hadController = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then((r) => r.update()).catch(() => {});
