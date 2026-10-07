@@ -3033,7 +3033,7 @@ async function loadTripFile(file, status, label) {
   let text, obj;
   try { text = await readFileText(file); }
   catch (e) { status.innerHTML = `Das Handy gibt die ${nm} nicht frei${mb}. Das passiert bei grossen Dateien aus Proton Drive. So geht es: in Proton Drive bei der Datei ⋮ → „Herunterladen“, dann hier einlesen und unter „Downloads“ wählen. Neue Reisedateien legen die Tickets in kleine Extra-Dateien, dann klappt es meist direkt. (${esc((e && e.name) || "Lesefehler")})`; return null; }
-  if (/RD[01]\.\d+\./.test(text) && !/reise-verschluesselt/.test(text.slice(0, 200))) { status.textContent = ""; return (await importMessageText(text)) ? undefined : null; }
+  if (/RD[01]\.\d+\.|RT\.[A-Z0-9]{6}\./.test(text) && !/reise-verschluesselt/.test(text.slice(0, 200))) { status.textContent = ""; return (await importMessageText(text)) ? undefined : null; }
   try { obj = parseLoose(text); }
   catch { status.innerHTML = `Die ${nm} ist unvollständig oder beschädigt${mb}. Meist wurde sie nicht ganz heruntergeladen: nochmals herunterladen und erneut wählen.`; return null; }
   if (obj && obj.format === "reise-verschluesselt") {
@@ -3100,6 +3100,12 @@ async function unpackMessage(text, pw) {
   if (gz === "1") { if (!HAS_GZ) throw { code: "old" }; pt = await gzBytes(pt, false); }
   return JSON.parse(TD.decode(pt));
 }
+const MSG_PART = 3000;   // WhatsApp/iPhone geben geteilten Text nur bis etwa 4 KB weiter, darum in Teile
+function partText(ps, i) { return `Reise-App, Teil ${i + 1} von ${ps.parts.length}. Alle Teile nacheinander in der App einfügen (Einstellungen → Sichern und abgleichen → „Aus Nachricht einfügen“).\n\nRT.${ps.id}.${i + 1}.${ps.parts.length}.${ps.parts[i].length}.${ps.parts[i]}`; }
+async function sendText(text) {
+  if (navigator.share) { try { await navigator.share({ text }); return "shared"; } catch (e) { if (e && e.name === "AbortError") return "abort"; } }
+  await navigator.clipboard.writeText(text); return "copied";
+}
 async function shareMessage(btn) {
   const pw = $("st-pw").value;
   if (pw.length < 8) { toast("Bitte ein Passwort mit mindestens 8 Zeichen eintragen."); $("st-pw").focus(); return; }
@@ -3107,14 +3113,43 @@ async function shareMessage(btn) {
   btn.disabled = true;
   try {
     const code = await packMessage(await buildPayload(false), pw);
-    if (code.length > 60000) { toast("Zu gross für eine Nachricht. Bitte „Alles sichern“ als Datei nehmen."); return; }
-    const text = `Reise-Daten für die Reise-App. Nachricht kopieren, dann in der App: Einstellungen → Sichern und abgleichen → „Aus Nachricht einfügen“.\n\n${code}`;
-    let done = false;
-    if (navigator.share) { try { await navigator.share({ text }); done = true; } catch (e) { if (e && e.name === "AbortError") return; } }
-    if (!done) { await navigator.clipboard.writeText(text); toast("Kopiert. In WhatsApp einfügen und senden."); }
-    setPref("lastExport", String(Date.now()));
+    if (code.length > 200000) { toast("Zu gross für Nachrichten. Bitte „Alles sichern“ als Datei nehmen."); return; }
+    if (code.length <= MSG_PART) {
+      const r = await sendText(`Reise-Daten für die Reise-App. Nachricht kopieren, dann in der App: Einstellungen → Sichern und abgleichen → „Aus Nachricht einfügen“.\n\n${code}`);
+      if (r === "abort") return;
+      if (r === "copied") toast("Kopiert. In WhatsApp einfügen und senden.");
+      setPref("lastExport", String(Date.now()));
+      return;
+    }
+    const parts = []; for (let i = 0; i < code.length; i += MSG_PART) parts.push(code.slice(i, i + MSG_PART));
+    S.msgSend = { id: Array.from(crypto.getRandomValues(new Uint8Array(6)), (x) => "ACDEFHJKLMNPRTUVWXY34679"[x % 24]).join(""), parts, i: 0 };
+    renderSettings();
+    await sharePart();
   } catch { toast("Erstellen ging nicht."); }
   finally { btn.disabled = false; }
+}
+async function sharePart() {
+  const ps = S.msgSend; if (!ps || ps.i >= ps.parts.length) return;
+  const r = await sendText(partText(ps, ps.i));
+  if (r === "abort") return;
+  if (r === "copied") toast(`Teil ${ps.i + 1} kopiert. In WhatsApp einfügen und senden.`);
+  ps.i++; setPref("lastExport", String(Date.now())); renderSettings();
+}
+// Empfänger: Teile sammeln (bleiben gespeichert, bis alle da sind)
+function msgParts(text) {
+  const out = []; const re = /RT\.([A-Z0-9]{6})\.(\d+)\.(\d+)\.(\d+)\.([^]*?)(?=RT\.[A-Z0-9]{6}\.\d+\.\d+\.\d+\.|Reise-App, Teil|$)/g; let m;
+  while ((m = re.exec(String(text || "")))) { const c = m[5].replace(/\s/g, ""); out.push({ id: m[1], i: +m[2], n: +m[3], len: +m[4], chunk: c.slice(0, +m[4]), short: c.length < +m[4] }); }
+  return out;
+}
+function collectParts(found) {
+  let st = null; try { st = JSON.parse(pref("msgparts", "null")); } catch {}
+  for (const f of found) {
+    if (!st || st.id !== f.id) st = { id: f.id, n: f.n, p: {} };
+    st.p[f.i] = f.chunk;
+  }
+  const missing = []; for (let i = 1; i <= st.n; i++) if (!st.p[i]) missing.push(i);
+  if (missing.length) { setPref("msgparts", JSON.stringify(st)); return { missing, n: st.n }; }
+  return { text: Array.from({ length: st.n }, (_, i) => st.p[i + 1]).join("") };
 }
 // Warum passt es nicht? Mit der Kennung in der Datei lässt sich sagen: anderes Passwort oder beschädigte Datei.
 async function pwFailText(fileTag, pw, what, len) {
@@ -3127,13 +3162,22 @@ async function importMessageText(text) {
   const status = $("st-importstatus") || document.createElement("p");
   const pw = ($("st-pw") && $("st-pw").value) || pref("pw", "");
   if (!pw) { status.textContent = "Trag oben das Passwort ein, dann nochmals einfügen."; return false; }
+  const found = msgParts(text);
+  if (found.length) {
+    const sh = found.find((f) => f.short);
+    if (sh) { status.textContent = `Teil ${sh.i} von ${sh.n} ist nicht ganz angekommen (${sh.chunk.length} von ${sh.len} Zeichen). Diesen Teil in WhatsApp nochmals ganz kopieren und einfügen.`; return false; }
+    const r = collectParts(found);
+    if (r.missing) { status.textContent = `Teil ${found.map((f) => f.i).join(", ")} von ${r.n} ist da. ${r.missing.length === 1 ? `Es fehlt noch Teil ${r.missing[0]}` : `Es fehlen noch die Teile ${r.missing.join(", ")}`}: in WhatsApp kopieren und hier einfügen.`; return false; }
+    text = r.text;
+  }
   let payload;
   try { payload = await unpackMessage(text, pw); }
   catch (e) {
-    status.innerHTML = e && e.code === "pw" ? await pwFailText(e.tag, pw, "Nachricht", e.n ? { n: e.n, want: e.want, end: e.end } : 0) : e && e.code === "old" ? "Dieses Handy ist zu alt für gepackte Nachrichten. Bitte die Datei nehmen." : "Darin sind keine Reise-Daten. Die ganze Nachricht kopieren, auch den Teil mit „RD1.“.";
+    status.innerHTML = e && e.code === "pw" ? await pwFailText(e.tag, pw, "Nachricht", e.n ? { n: e.n, want: e.want, end: e.end } : 0) : e && e.code === "old" ? "Dieses Handy ist zu alt für gepackte Nachrichten. Bitte die Datei nehmen." : "Darin sind keine Reise-Daten. Die ganze Nachricht kopieren, auch den Teil mit „RD1.“ oder „RT.“.";
     return false;
   }
   S.fromMessage = true;
+  setPref("msgparts", "");
   await importTripFile([new File([JSON.stringify(payload)], "Nachricht.json", { type: "application/json" })]);
   return true;
 }
@@ -3305,8 +3349,9 @@ function renderSettings() {
       <div class="actions">${app ? "" : `<button class="btn solid" type="button" id="st-export">Alles sichern</button>`}
         <label class="btn${app ? " solid" : ""}" for="st-import">Reisedatei einlesen</label><input id="st-import" type="file" accept=".txt,.json,text/plain,application/json" multiple hidden></div>
       <div class="actions">${app ? "" : `<button class="btn" type="button" id="st-msg">Als Nachricht teilen</button>`}<button class="btn" type="button" id="st-paste">Aus Nachricht einfügen</button>${S.pendingShare ? `<button class="btn solid" type="button" id="st-pendgo">Geteilte Daten einlesen</button>` : ""}</div>
+      ${S.msgSend ? `<div class="field wide" id="st-partbox"><p class="note" style="margin:0 0 8px">${S.msgSend.i < S.msgSend.parts.length ? `Die Nachricht ist lang und geht in ${S.msgSend.parts.length} Teilen raus. Jeden Teil in WhatsApp senden, die andere Person fügt sie nacheinander ein.` : `Alle ${S.msgSend.parts.length} Teile sind verschickt.`}</p><div class="actions">${S.msgSend.i < S.msgSend.parts.length ? `<button class="btn solid" type="button" id="st-partgo">Teil ${S.msgSend.i + 1} von ${S.msgSend.parts.length} senden</button>` : ""}<button class="btn" type="button" id="st-partend">${S.msgSend.i < S.msgSend.parts.length ? "Abbrechen" : "Fertig"}</button></div></div>` : ""}
       <div class="field wide" id="st-pastebox" hidden><label for="st-pastetext">Nachricht einfügen</label><textarea id="st-pastetext" rows="3" placeholder="Lange tippen und „Einsetzen“"></textarea><div class="actions" style="margin-top:8px"><button class="btn solid" type="button" id="st-pastego">Einlesen</button></div></div>
-      ${app ? "" : `<p class="note" style="margin:0">„Als Nachricht teilen“ schickt alles ausser den Tickets als verschlüsselten Text, z. B. per WhatsApp. Die andere Person kopiert die Nachricht und tippt in der App auf „Aus Nachricht einfügen“.</p>`}
+      ${app ? "" : `<p class="note" style="margin:0">„Als Nachricht teilen“ schickt alles ausser den Tickets als verschlüsselten Text, z. B. per WhatsApp, bei viel Inhalt in mehreren Teilen. Die andere Person kopiert jede Nachricht und tippt in der App auf „Aus Nachricht einfügen“.</p>`}
       <p class="note" id="st-importstatus" aria-live="polite">${lastEx ? `Zuletzt gesichert: ${fmtWhen(lastEx)}. ` : ""}${lastIm ? `Zuletzt eingelesen: ${fmtWhen(lastIm)}.` : ""}</p>`;
     else if (pg === "kasse") c = S.kasse ? `
       <div class="kmenu">
@@ -3380,10 +3425,12 @@ function renderSettings() {
     b.setAttribute("aria-pressed", String(S.pwShow)); b.setAttribute("aria-label", S.pwShow ? "Passwort verbergen" : "Passwort zeigen");
   });
   $("st-pendgo")?.addEventListener("click", runPendingShare);
+  $("st-partgo")?.addEventListener("click", sharePart);
+  $("st-partend")?.addEventListener("click", () => { S.msgSend = null; renderSettings(); });
   $("st-paste")?.addEventListener("click", async () => {
     let t = "";
     try { t = await navigator.clipboard.readText(); } catch {}
-    if (t && /RD[01]\./.test(t)) { await importMessageText(t); return; }
+    if (t && /RD[01]\.|RT\./.test(t)) { await importMessageText(t); return; }
     const box = $("st-pastebox"); box.hidden = false; $("st-pastetext").focus();
   });
   $("st-pastego")?.addEventListener("click", async () => { if (await importMessageText($("st-pastetext").value)) $("st-pastetext").value = ""; });
