@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="referrer" content="no-referrer">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' blob: data: https://cdn.jsdelivr.net https://*.currency-api.pages.dev https://api.frankfurter.dev; object-src 'none'; base-uri 'self'; form-action 'none'">
-<link rel="manifest" href="manifest.webmanifest?v=31">
+<link rel="manifest" href="manifest.webmanifest?v=32">
 <link rel="icon" href="koffer-192.png">
 <link rel="apple-touch-icon" href="koffer-180.png">
 <title>Reise</title>
@@ -483,14 +483,20 @@ label.btn { cursor: pointer; }
 .band .sub .miss { color: var(--wood); }
 .rail { padding: 4px 0 22px 26px; }
 .hop { display: grid; grid-template-columns: 11px minmax(0, 1fr) 16px; gap: 0 15px; align-items: center; width: 100%; min-height: 54px; background: none; border: 0; padding: 0; margin: 8px 0; cursor: pointer; text-align: left; color: var(--muted); font-size: 13px; letter-spacing: .04em; }
-.hop .hl { position: relative; align-self: stretch; display: grid; place-items: center; }
+.hop .hl { position: relative; align-self: stretch; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .hop .hl::before { content: ""; position: absolute; left: 4.75px; top: 0; bottom: 0; border-left: 1.5px dashed var(--line-strong); }
 .hop .hl svg { position: relative; width: 20px; height: 20px; flex: none; background: var(--bg); padding: 4px 0; box-sizing: content-box; color: var(--ink); }
 .hop .chev { display: grid; place-items: center; }
 .hop .chev svg { width: 14px; height: 14px; }
 .hop .flag { color: var(--wood); letter-spacing: 0; }
 .hop.past { opacity: .55; }
-.hop + .land { margin-top: 0; }
+.hop + .land, .hopw + .land { margin-top: 0; }
+.hop.multi { min-height: 70px; }
+.rail > .hop, .rail > .hopw { margin: 0 0 0 -26px; width: calc(100% + 26px); }
+.rail > .hopw > .hop { margin: 0; width: 100%; }
+.stop:has(+ .hop)::after, .stop:has(+ .hopw)::after { bottom: 0; }
+.hopw.open > .hop .chev { transform: rotate(90deg); }
+.hoplegs { margin: 0 0 6px 26px; border-top: 1px solid var(--line); }
 .stations .station.stop { border: 0; position: relative; }
 .stop > .sthead { border-bottom: 1px solid var(--line); }
 .stop[open] > .sthead { border-bottom: 0; }
@@ -1139,8 +1145,36 @@ function moveSides(e) {
   return [fk, tk];
 }
 function isBorder(e) { if (!e.move || !phases().length) return false; const [a, b] = moveSides(e); return a !== b; }
+// Fahrten zu Reisen zusammenfassen: geht es am Zielort ohne Übernachtung und ohne Termin innert 20 Stunden weiter
+// (z. B. Flug zu einem Flughafen, dann Fähre zur Insel), ist der Zwischenort nur ein Umstieg und keine Station.
+const legKey = (n) => n ? norm(stationName(n)) : "";
+function journeys() {
+  const ev = sortedEvents(), stays = ev.filter((e) => !e.move), out = [];
+  let cur = null;
+  for (const e of ev.filter((x) => x.move)) {
+    if (cur) {
+      const last = cur.legs[cur.legs.length - 1], k = legKey(last.to), arr = last.end || last.start;
+      const arrDay = last.end ? localDateIn(last.end, last.endTz) : (last.edate || last.sdate);
+      const soon = e.noTime || last.noTime ? e.sdate === arrDay : (e.start >= arr - 36e5 && e.start - arr <= 20 * 36e5);   // ohne Uhrzeit: gleicher Tag
+      const ok = k && legKey(e.from) === k && soon
+        && !stays.some((x) => legKey(x.place) === k && x.start < e.start && (x.end || x.start) >= arr);
+      if (ok) { cur.legs.push(e); continue; }
+    }
+    cur = { legs: [e] }; out.push(cur);
+  }
+  for (const j of out) {
+    const a = j.legs[0], z = j.legs[j.legs.length - 1];
+    j.id = a.id; j.from = a.from; j.to = z.to; j.start = a.start; j.end = z.end || z.start; j.sdate = a.sdate;
+    j.arr = z.end ? localDateIn(z.end, z.endTz) : (z.edate || z.sdate);
+    j.fk = moveSides(a)[0]; j.tk = moveSides(z)[1];
+    j.border = phases().length > 0 && j.fk !== j.tk;
+    j.via = j.legs.slice(0, -1).map((l) => l.to).filter(Boolean);
+    j.round = !j.border && !!legKey(j.from) && legKey(j.from) === legKey(j.to);   // Ausflug hin und zurück bleibt beim Ort
+  }
+  return out;
+}
 function stations() {
-  const byKey = new Map(), list = [], border = [];
+  const byKey = new Map(), list = [], border = [], hops = [];
   const get = (name) => {
     const nm = stationName(name), k = norm(nm);
     if (!byKey.has(k)) { const c = findCity(nm); const st = { key: k, name: nm, country: c ? c.country : null, events: [] }; byKey.set(k, st); list.push(st); }
@@ -1148,12 +1182,17 @@ function stations() {
   };
   const none = { key: "", name: "Noch ohne Ort", country: null, events: [] };
   for (const e of sortedEvents()) {
-    let st;
-    if (isBorder(e)) { border.push(e); continue; }
-    if (e.move) st = e.to && e.toCountry ? get(e.to) : e.from && e.fromCountry ? get(e.from) : e.to ? get(e.to) : e.from ? get(e.from) : none;
-    else st = e.place ? get(e.place) : none;
+    if (e.move) continue;
+    const st = e.place ? get(e.place) : none;
     st.events.push(e);
-    if (!st.country && !e.move) st.country = e.country;
+    if (!st.country) st.country = e.country;
+  }
+  // Fahrten stehen zwischen den Orten, nicht bei einem Ort; der Zielort entsteht auch ohne Hotel (dann "Unterkunft fehlt")
+  for (const j of journeys()) {
+    if (j.round) { const st = get(j.from); st.events.push(...j.legs); continue; }
+    (j.border ? border : hops).push(j);
+    if (j.to && j.tk !== "_home") { const st = get(j.to); (st.arr = st.arr || []).push(j); if (!st.country && j.tk !== "_home") st.country = j.legs[j.legs.length - 1].toCountry || (phaseByKey(j.tk) ? j.tk : null); }
+    const fs = j.from ? byKey.get(legKey(j.from)) : null; if (fs) (fs.dep = fs.dep || []).push(j);
   }
   // at each place, the journey there comes first on its day (a hotel check-in "from 15:00" is never before the arrival)
   const arrDate = (e) => e.end ? localDateIn(e.end, e.endTz) : (e.edate || e.sdate);
@@ -1163,9 +1202,9 @@ function stations() {
     st.events.sort((x, y) => { const A = key(x), B = key(y); return A[0] < B[0] ? -1 : A[0] > B[0] ? 1 : (A[1] - B[1]) || (A[2] - B[2]); });
   }
   const span = (st) => {
-    const ds = st.events.flatMap((e) => [e.sdate, e.edate || e.sdate]).filter(Boolean).sort();
+    const ds = [...st.events.flatMap((e) => [e.sdate, e.edate || e.sdate]), ...(st.arr || []).map((j) => j.arr), ...(st.dep || []).map((j) => j.sdate)].filter(Boolean).sort();
     st.from = ds[0]; st.to = ds[ds.length - 1];
-    st.first = Math.min(...st.events.map((e) => e.start));
+    st.first = Math.min(...st.events.map((e) => e.start), ...(st.arr || []).map((j) => j.end));
   };
   list.forEach(span);
   // Orte, die nicht in der Städteliste stehen (kleine Orte, Resorts): Land aus den Terminen dort oder aus den Reisedaten ableiten,
@@ -1180,7 +1219,7 @@ function stations() {
   }
   list.sort((a, b) => a.first - b.first);
   if (none.events.length) { span(none); list.push(none); }
-  list.border = border;
+  list.border = border; list.hops = hops;
   return list;
 }
 function fmtRange(a, b) {
@@ -1248,18 +1287,29 @@ function renderReise() {
     lands.sort((a, b) => (a.key === "_none") - (b.key === "_none"));
     const lOpen = landOpenSet(lands, td);
     let shown = 0;
-    const hops = (sts.border || []).filter((e) => matchFilter(e, S.rFilter)), used = new Set();
-    const hopHtml = (e) => {
-      const [fk, tk] = moveSides(e), cf = conflicts().get(e.id);
-      const lbl = fk === "_home" ? "Anreise" : tk === "_home" ? "Rückreise" : "Weiterreise";
-      const flag = e.tentative ? "Vorschlag" : e.placeholder ? "Details fehlen" : e.noTime ? "Uhrzeit fehlt" : !(e.attachments || []).length ? "kein Ticket" : "";
-      return `<button class="hop ${isPast(e, now) ? "past" : ""}" type="button" data-open="${esc(e.id)}" aria-label="${lbl}: ${esc(titleOf(e))}"><span class="hl">${icon(e.type)}</span><span class="ht">${lbl}${cf && cf.mark ? ` <span class="cw">${warnI()}</span>` : ""}${flag ? ` <span class="flag">· ${flag}</span>` : ""}</span><span class="chev">${ui("chev")}</span></button>`;
+    const jm = (j) => j.legs.some((e) => matchFilter(e, S.rFilter));
+    const hops = (sts.border || []).filter(jm), inner = (sts.hops || []).filter(jm), used = new Set();
+    if (!S.hopOpen) S.hopOpen = new Set();
+    const legFlag = (e) => e.tentative ? "Vorschlag" : e.placeholder ? "Details fehlen" : e.noTime ? "Uhrzeit fehlt" : !(e.attachments || []).length ? "kein Ticket" : "";
+    const hopHtml = (j) => {
+      const lbl = j.border ? (j.fk === "_home" ? "Anreise" : j.tk === "_home" ? "Rückreise" : "Weiterreise") : "Weiterreise";
+      const many = j.legs.length > 1, open = many && S.hopOpen.has(j.id);
+      const flag = j.legs.map(legFlag).find(Boolean) || "";
+      const warn = j.legs.some((e) => (conflicts().get(e.id) || {}).mark);
+      const past = j.legs.every((e) => isPast(e, now));
+      const via = j.via.length ? ` · über ${j.via.map(esc).join(", ")}` : "";
+      const btn = `<button class="hop ${past ? "past" : ""} ${many ? "multi" : ""}" type="button" ${many ? `data-hop="${esc(j.id)}" aria-expanded="${open}"` : `data-open="${esc(j.id)}"`} aria-label="${lbl}: ${esc(j.legs.map(titleOf).join(", "))}"><span class="hl">${j.legs.map((e) => icon(e.type)).join("")}</span><span class="ht">${lbl}${via}${warn ? ` <span class="cw">${warnI()}</span>` : ""}${flag ? ` <span class="flag">· ${flag}</span>` : ""}</span><span class="chev">${ui("chev")}</span></button>`;
+      return many ? `<div class="hopw ${open ? "open" : ""}">${btn}${open ? `<ul class="rows hoplegs">${j.legs.map((e) => rowHtml(e, now, true)).join("")}</ul>` : ""}</div>` : btn;
     };
-    const hopsBefore = (key) => hops.filter((e) => !used.has(e.id) && moveSides(e)[1] === key).map((e) => { used.add(e.id); return hopHtml(e); }).join("");
+    const hopsBefore = (key) => hops.filter((j) => !used.has(j.id) && j.tk === key).map((j) => { used.add(j.id); return hopHtml(j); }).join("");
     for (const L of lands) {
-      const stops = L.sts.map((st) => ({ st, rows: st.events.filter((e) => matchFilter(e, S.rFilter)) })).filter((x) => x.rows.length);
+      const stopsAll = L.sts.map((st) => ({ st, rows: st.events.filter((e) => matchFilter(e, S.rFilter)) }));
+      const stops = stopsAll.filter((x) => x.rows.length || (S.rFilter === "all" && x.st.key));
+      // Fahrten innerhalb dieses Landes: vor dem Zielort, sonst nach der Zeit
+      const myHops = inner.filter((j) => !used.has(j.id) && (L.sts.some((st) => st.key && st.key === legKey(j.to)) || (!legKey(j.to) && L.ph && j.sdate >= L.ph.from && j.sdate <= L.ph.to)));
+      myHops.forEach((j) => used.add(j.id));
       if (L.key !== "_none") body += hopsBefore(L.key);
-      if (!stops.length) continue;
+      if (!stops.length && !myHops.length) continue;
       shown++;
       const nRows = stops.reduce((n, x) => n + x.rows.length, 0);
       const places = stops.filter((x) => x.st.key).length;
@@ -1270,6 +1320,7 @@ function renderReise() {
       const name = L.ph ? L.ph.name : L.key === "_none" ? "Noch ohne Ort" : "Weitere Orte";
       const confL = stops.some(({ st }) => st.events.some((e) => (conflicts().get(e.id) || {}).mark));
       const sub = [isHereL ? `<span class="here">Ihr seid hier</span>` : "", places > 1 ? `${places} Orte` : "", `${nRows} ${nRows === 1 ? "Termin" : "Termine"}`, missL ? `<span class="miss">Unterkunft fehlt</span>` : "", confL ? `<span class="miss cwm">${warnI()}prüfen</span>` : ""].filter(Boolean).join(" · ");
+      const hopFor = (st) => myHops.filter((j) => !j.placed && (legKey(j.to) === st.key || (!legKey(j.to) && j.start < st.first))).map((j) => { j.placed = true; return hopHtml(j); }).join("");
       const stopHtml = stops.map(({ st, rows }) => {
         const sk = st.key || "_none";
         const tipsN = st.key ? tipsAt(st.name).length : 0;
@@ -1278,30 +1329,30 @@ function renderReise() {
         const isHere = st.key && st.from <= td && td <= st.to;
         const past = st.to && st.to < td;
         const meta = [
-          `<span>${rows.length} ${rows.length === 1 ? "Termin" : "Termine"}</span>`,
+          rows.length ? `<span>${rows.length} ${rows.length === 1 ? "Termin" : "Termine"}</span>` : "",
           tipsN ? `<span>${tipsN} ${tipsN === 1 ? "Tipp" : "Tipps"}</span>` : "",
           st.key && nights >= 1 && !hasStay ? `<span class="miss">Unterkunft fehlt</span>` : "",
           st.events.some((e) => (conflicts().get(e.id) || {}).mark) ? `<span class="miss cwm">${warnI()}prüfen</span>` : ""
         ].filter(Boolean).join("");
-        return `<details class="station stop ${isHere ? "now" : ""} ${past ? "past" : ""}" data-st="${esc(sk)}" ${opened.has(sk) ? "open" : ""}>
+        return hopFor(st) + `<details class="station stop ${isHere ? "now" : ""} ${past ? "past" : ""}" data-st="${esc(sk)}" ${opened.has(sk) ? "open" : ""}>
           <summary class="sthead">
             <h3>${esc(st.key ? st.name : "Ohne Ort")}</h3><span class="when">${fmtRange(st.from, st.to)}</span><span class="chev">${ui("chev")}</span>
             <span class="meta">${meta}</span>
           </summary>
           <div class="stbody">
-            <ul class="rows">${rows.map((e) => rowHtml(e, now, true)).join("")}</ul>
+            ${rows.length ? `<ul class="rows">${rows.map((e) => rowHtml(e, now, true)).join("")}</ul>` : ""}
             ${st.key ? `<button class="morerow" type="button" data-place="${esc(st.name)}"><span>${tipsN ? "Tipps und alles zu " : "Alles zu "}${esc(st.name)}</span><span>${ui("chev")}</span></button>` : ""}
           </div>
         </details>`;
-      }).join("");
+      }).join("") + myHops.filter((j) => !j.placed).map(hopHtml).join("");
       body += `<details class="land ${isHereL ? "now" : ""}" data-land="${esc(L.key)}" ${lOpen.has(L.key) ? "open" : ""}>
         <summary class="band"><b>${esc(name)}</b><span class="dt">${fmtRange(from, to)}</span><span class="chev">${ui("chev")}</span><span class="sub">${sub}</span></summary>
         <div class="rail">${stopHtml}</div>
       </details>`;
     }
-    const rest = hops.filter((e) => !used.has(e.id)).map(hopHtml).join("");
+    const rest = hops.filter((j) => !used.has(j.id)).map(hopHtml).join("");
     if (rest) { const i = body.lastIndexOf('<details class="land " data-land="_none"'); body = i >= 0 ? body.slice(0, i) + rest + body.slice(i) : body + rest; }
-    if (!shown && !hops.length) body = `<p class="note">Nichts in dieser Auswahl.</p>`;
+    if (!shown && !hops.length && !inner.length) body = `<p class="note">Nichts in dieser Auswahl.</p>`;
   }
   const open = S.packing.filter((p) => (!p.mode || p.mode === "pack") && !isPacked(p)).length;
   const packRow = `<button class="morerow" type="button" id="openpack"><span>Packliste</span><span>${S.packing.length ? (open ? `${open} offen` : "alles gepackt") : "noch leer"}${ui("chev")}</span></button>`;
@@ -1309,6 +1360,7 @@ function renderReise() {
   const root = $("reise-list");
   bindRows(root);
   root.querySelectorAll("[data-place]").forEach((b) => b.addEventListener("click", () => openPlace(b.dataset.place)));
+  root.querySelectorAll("[data-hop]").forEach((b) => b.addEventListener("click", () => { const k = b.dataset.hop; if (S.hopOpen.has(k)) S.hopOpen.delete(k); else S.hopOpen.add(k); renderReise(); }));
   root.querySelectorAll("details.station").forEach((d) => d.addEventListener("toggle", () => { const set = stOpenSet(); if (d.open) set.add(d.dataset.st); else set.delete(d.dataset.st); }));
   root.querySelectorAll("details.land").forEach((d) => d.addEventListener("toggle", () => { const set = landOpenSet(); if (d.open) set.add(d.dataset.land); else set.delete(d.dataset.land); }));
   $("reise-filter").querySelectorAll("[data-rf]").forEach((b) => b.addEventListener("click", () => { S.rFilter = b.dataset.rf; renderReise(); }));
@@ -3442,7 +3494,7 @@ document.addEventListener("click", async (ev) => {
   catch { window.open(url, "_blank", "noopener"); }
 }, true);
 
-const APP_VERSION = "31";
+const APP_VERSION = "32";
 /* ---------- Render & boot ---------- */
 function render() {
   _sorted = null; _conf = null;
