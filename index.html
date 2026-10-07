@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="referrer" content="no-referrer">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' blob: data: https://cdn.jsdelivr.net https://*.currency-api.pages.dev https://api.frankfurter.dev; object-src 'none'; base-uri 'self'; form-action 'none'">
-<link rel="manifest" href="manifest.webmanifest?v=39">
+<link rel="manifest" href="manifest.webmanifest?v=40">
 <link rel="icon" href="koffer-192.png">
 <link rel="apple-touch-icon" href="koffer-180.png">
 <title>Reise</title>
@@ -3033,6 +3033,7 @@ async function loadTripFile(file, status, label) {
   let text, obj;
   try { text = await readFileText(file); }
   catch (e) { status.innerHTML = `Das Handy gibt die ${nm} nicht frei${mb}. Das passiert bei grossen Dateien aus Proton Drive. So geht es: in Proton Drive bei der Datei ⋮ → „Herunterladen“, dann hier einlesen und unter „Downloads“ wählen. Neue Reisedateien legen die Tickets in kleine Extra-Dateien, dann klappt es meist direkt. (${esc((e && e.name) || "Lesefehler")})`; return null; }
+  if (/RD[01]\.\d+\./.test(text) && !/reise-verschluesselt/.test(text.slice(0, 200))) { status.textContent = ""; return (await importMessageText(text)) ? undefined : null; }
   try { obj = parseLoose(text); }
   catch { status.innerHTML = `Die ${nm} ist unvollständig oder beschädigt${mb}. Meist wurde sie nicht ganz heruntergeladen: nochmals herunterladen und erneut wählen.`; return null; }
   if (obj && obj.format === "reise-verschluesselt") {
@@ -3064,16 +3065,39 @@ async function packMessage(payload, pw) {
   if (HAS_GZ) { raw = await gzBytes(raw, true); z = "1"; }
   const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12)), iter = 310000;
   const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await deriveKey(normPw(pw), salt, iter), raw);
-  return `RD${z}.${iter}.${await pwTag(pw)}.${b64(salt)}.${b64(iv)}.${b64(ct)}`;
+  const d = b64(ct);
+  return `RD${z}.${iter}.${await pwTag(pw)}.${b64(salt)}.${b64(iv)}.${d}.L${d.length}`;
 }
 async function unpackMessage(text, pw) {
   const x = /RD([01])\.(\d+)\.(?:([A-Z0-9]{4})\.)?([A-Za-z0-9+/=]{20,})\.([A-Za-z0-9+/=]{12,})\.([A-Za-z0-9+/=\s]+)/.exec(String(text || ""));
   if (!x) throw { code: "no_msg" };
-  const m = [x[0], x[1], x[2], x[4], x[5], x[6]], tag = x[3] || "";
-  let pt;
-  try { pt = new Uint8Array(await withPw(pw, async (p) => crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(m[4]) }, await deriveKey(p, unb64(m[3]), +m[2]), unb64(m[5].replace(/\s/g, ""))))); }
-  catch { throw { code: "pw", tag }; }
-  if (m[1] === "1") { if (!HAS_GZ) throw { code: "old" }; pt = await gzBytes(pt, false); }
+  const gz = x[1], iter = +x[2], tag = x[3] || "";
+  let salt, iv;
+  try { salt = unb64(x[4]); iv = unb64(x[5]); } catch { throw { code: "damaged", tag }; }
+  // Datenteil: die erste zusammenhängende Zeichenfolge, sonst alles ohne Leerraum (Umbrüche von WhatsApp/iPhone).
+  // Hängt Text dahinter (Uhrzeit, Name), wird am Ende schrittweise gekürzt.
+  const first = x[6].trim().split(/\s+/)[0] || "", all = x[6].replace(/\s/g, "");
+  const cands = [];
+  for (const raw of [first, all]) {
+    const m = /=+/.exec(raw);
+    let c = m ? raw.slice(0, m.index + m[0].length) : raw;
+    for (let cut = 0; cut <= 48 && c.length - cut > 32; cut++) { const d = c.slice(0, c.length - cut); if (!cands.includes(d)) cands.push(d); }
+  }
+  let pt = null;
+  for (const v of pwVariants(pw)) {
+    const key = await deriveKey(v, salt, iter);
+    for (const c of cands) {
+      let bytes; try { bytes = unb64(c.length % 4 ? c + "=".repeat(4 - (c.length % 4)) : c); } catch { continue; }
+      try { pt = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, bytes)); break; } catch {}
+    }
+    if (pt) break;
+  }
+  if (!pt) {
+    const L = /\.L(\d+)/.exec(String(text).slice(x.index + x[0].length, x.index + x[0].length + 12));
+    const want = L ? +L[1] : 0, have = (/=+/.exec(all) ? all.slice(0, /=+/.exec(all).index + /=+/.exec(all)[0].length) : all).length;
+    throw { code: "pw", tag, n: have, want, end: all.slice(-8) };
+  }
+  if (gz === "1") { if (!HAS_GZ) throw { code: "old" }; pt = await gzBytes(pt, false); }
   return JSON.parse(TD.decode(pt));
 }
 async function shareMessage(btn) {
@@ -3093,10 +3117,10 @@ async function shareMessage(btn) {
   finally { btn.disabled = false; }
 }
 // Warum passt es nicht? Mit der Kennung in der Datei lässt sich sagen: anderes Passwort oder beschädigte Datei.
-async function pwFailText(fileTag, pw, what) {
+async function pwFailText(fileTag, pw, what, len) {
   const mine = await pwTag(pw);
   if (fileTag && mine && fileTag !== mine) return `Diese ${what} wurde mit einem anderen Passwort erstellt: Kennung <b class="pwtag">${esc(fileTag)}</b>. Dein Passwort hat Kennung <b class="pwtag">${mine}</b>. Auf dem anderen Handy unter „Sichern und abgleichen“ mit dem Auge nachschauen, welches Passwort dort steht, oder dort mit eurem Passwort neu sichern und nochmals schicken.`;
-  if (fileTag && fileTag === mine) return `Das Passwort stimmt (Kennung <b class="pwtag">${mine}</b>), aber die ${what} ist beschädigt oder unvollständig. Bitte nochmals schicken${what === "Nachricht" ? " und die ganze Nachricht kopieren" : ""}.`;
+  if (fileTag && fileTag === mine) return `Das Passwort stimmt (Kennung <b class="pwtag">${mine}</b>), aber die ${what} ist beschädigt oder unvollständig.${len && len.want && len.n < len.want ? ` Es fehlen ${len.want - len.n} von ${len.want} Zeichen, die Nachricht ist abgeschnitten.` : len && len.want && len.n > len.want ? ` Es sind ${len.n - len.want} Zeichen zu viel darin, wohl hinten etwas mitkopiert.` : len && len.want ? " Die Länge stimmt, aber Zeichen wurden unterwegs verändert." : len ? ` Angekommen sind ${len.n} Zeichen Daten, das Ende lautet „…${esc(len.end)}“.` : ""} Bitte nochmals schicken${what === "Nachricht" ? " und die ganze Nachricht kopieren" : ""}.`;
   return `Das Passwort passt nicht zu dieser ${what}. Sie ist älter und zeigt ihre Kennung noch nicht. Am einfachsten: auf dem anderen Handy das Passwort mit dem Auge prüfen, neu sichern und nochmals schicken. Dann zeigt die App, ob die Kennung passt.`;
 }
 async function importMessageText(text) {
@@ -3106,7 +3130,7 @@ async function importMessageText(text) {
   let payload;
   try { payload = await unpackMessage(text, pw); }
   catch (e) {
-    status.innerHTML = e && e.code === "pw" ? await pwFailText(e.tag, pw, "Nachricht") : e && e.code === "old" ? "Dieses Handy ist zu alt für gepackte Nachrichten. Bitte die Datei nehmen." : "Darin sind keine Reise-Daten. Die ganze Nachricht kopieren, auch den Teil mit „RD1.“.";
+    status.innerHTML = e && e.code === "pw" ? await pwFailText(e.tag, pw, "Nachricht", e.n ? { n: e.n, want: e.want, end: e.end } : 0) : e && e.code === "old" ? "Dieses Handy ist zu alt für gepackte Nachrichten. Bitte die Datei nehmen." : "Darin sind keine Reise-Daten. Die ganze Nachricht kopieren, auch den Teil mit „RD1.“.";
     return false;
   }
   S.fromMessage = true;
@@ -3745,7 +3769,7 @@ document.addEventListener("click", async (ev) => {
   catch { window.open(url, "_blank", "noopener"); }
 }, true);
 
-const APP_VERSION = "39";
+const APP_VERSION = "40";
 /* ---------- Render & boot ---------- */
 function render() {
   _sorted = null; _conf = null; _pres = null;
