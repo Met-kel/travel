@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="referrer" content="no-referrer">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' blob: data: https://cdn.jsdelivr.net https://*.currency-api.pages.dev https://api.frankfurter.dev; object-src 'none'; base-uri 'self'; form-action 'none'">
-<link rel="manifest" href="manifest.webmanifest?v=35">
+<link rel="manifest" href="manifest.webmanifest?v=36">
 <link rel="icon" href="koffer-192.png">
 <link rel="apple-touch-icon" href="koffer-180.png">
 <title>Reise</title>
@@ -645,7 +645,7 @@ ul.steps { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--
       <div class="field" data-step="when"><label for="f-etime" id="l-etime">Uhrzeit Ende</label><input id="f-etime" inputmode="numeric" maxlength="5" autocomplete="off" placeholder="hh:mm" enterkeyhint="next"></div>
       <div class="field wide" data-step="when"><button type="button" class="linkbtn" id="f-addend" style="padding:0" hidden>Ende hinzufügen</button></div>
       <div class="field wide" data-step="ticket"><label for="f-booking">Buchungsnummer, Sitzplatz</label><input id="f-booking" autocomplete="off"></div>
-      <div class="field wide" data-step="rest"><label class="check" style="text-transform:none;letter-spacing:0;color:var(--ink);font-size:14px"><input type="checkbox" id="f-tentative"> Nur ein Vorschlag, noch nicht fix</label></div>
+      <div class="field wide" data-step="rest"><label class="check" style="text-transform:none;letter-spacing:0;color:var(--ink);font-size:14px"><input type="checkbox" id="f-tentative"> Noch nicht fix: zu buchen, zu klären oder nur ein Vorschlag</label></div>
       <div class="field wide" data-step="ticket"><label for="f-links">Links</label><textarea id="f-links" rows="2" autocomplete="off" placeholder="Swiss: https://www.swiss.com/…"></textarea><span class="hint">Buchungsportal, Airline-App, Check-in. Ein Link pro Zeile, optional mit Namen davor.</span></div>
       <div class="field wide" data-step="ticket"><label for="f-files">Tickets</label>
         <div class="attlist" id="f-attlist"></div>
@@ -997,7 +997,8 @@ function countdownParts(ms) {
   if (ms <= 0) return ["Jetzt", ""];
   const min = Math.round(ms / 60000);
   if (min < 60) return [String(min), " Min."];
-  const hours = Math.floor(min / 60);
+  // auf die nächste volle Stunde runden: "noch 1 Tag 22 Std." soll ungefähr auf die Abflugzeit zeigen, nicht bis zu 59 Min. davor
+  const hours = Math.round(min / 60);
   if (hours < 24) return [String(hours), " Std."];
   const d = Math.floor(hours / 24), h = hours % 24;
   return [String(d), d === 1 ? " Tag" : " Tage", h ? String(h) : "", h ? " Std." : ""];
@@ -1136,7 +1137,7 @@ function tickCountdown() {
 /* Reise */
 function rowHtml(e, now, withDay) {
   const past = isPast(e, now);
-  const flag = e.tentative ? "Vorschlag" : e.placeholder ? "Details fehlen" : "";
+  const flag = openLabel(e);
   const cf = conflicts().get(e.id), cw = cf && (cf.mark || S.rFilter === "dup");
   return `<li><button class="row ${past ? "past" : ""}" type="button" data-open="${esc(e.id)}">
     <span class="t ${e.stime ? "" : "none"}">${withDay ? `${fmtDay(e.sdate).wd} ${fmtDay(e.sdate).d}.<br>` : ""}${e.stime ? esc(e.stime) : "–"}</span>
@@ -1149,7 +1150,14 @@ function bindRows(root) {
 }
 const RFILTERS = [["all", "Alle"], ["move", "Unterwegs"], ["hotel", "Unterkünfte"], ["plan", "Ausflüge & Essen"], ["open", "Offen"]];
 // "Offen" heisst: noch zu buchen. Ein fehlendes Ticket oder eine fehlende Uhrzeit ist kein offener Punkt.
-function isOpen(e) { return !!(e.placeholder || (e.tentative && (e.move || e.type === "hotel"))); }
+// Auch offen: eine Fahrt ohne Uhrzeit, ohne Buchungsnummer und ohne Ticket (z. B. ein Transfer, der noch geklärt werden muss).
+// "Ist geklärt" im Termin (confirmed) nimmt sie heraus, z. B. bei einem öffentlichen Bus.
+function isOpen(e) {
+  if (e.placeholder || (e.tentative && (e.move || e.type === "hotel"))) return true;
+  if (e.confirmed) return false;
+  return !!(e.move && !e.stime && !String(e.booking || "").trim() && !(e.attachments || []).length);
+}
+function openLabel(e) { return e.placeholder ? "Details fehlen" : e.tentative ? (e.move || e.type === "hotel" ? "zu klären" : "Vorschlag") : isOpen(e) ? "zu klären" : ""; }
 // Was fehlt noch: Weiterreisen zwischen zwei Orten ohne Fahrt, Nächte ohne Unterkunft
 function planGaps(sts) {
   sts = sts || stations();
@@ -1381,7 +1389,7 @@ function renderReise() {
     const jm = (j) => j.legs.some((e) => matchFilter(e, S.rFilter));
     const hops = (sts.border || []).filter(jm), inner = (sts.hops || []).filter(jm), used = new Set();
     if (!S.hopOpen) S.hopOpen = new Set();
-    const legFlag = (e) => e.tentative ? "Vorschlag" : e.placeholder ? "Details fehlen" : "";
+    const legFlag = openLabel;
     const hopHtml = (j) => {
       const lbl = j.border ? (j.fk === "_home" ? "Anreise" : j.tk === "_home" ? "Rückreise" : "Weiterreise") : "Weiterreise";
       const many = j.legs.length > 1, open = many && S.hopOpen.has(j.id);
@@ -1434,7 +1442,7 @@ function renderReise() {
         ].filter(Boolean).join("");
         const stayHtml = (S.rFilter === "all" || S.rFilter === "hotel" || S.rFilter === "open" ? stayEvs.filter((e) => S.rFilter !== "open" || isOpen(e)) : []).map((h) => {
             const n = h.edate && h.edate > h.sdate ? dayNumber(h.edate) - dayNumber(h.sdate) : 0;
-            return `<button class="stay ${isOpen(h) ? "tent" : ""}" type="button" data-open="${esc(h.id)}"><span class="si">${icon("hotel")}</span><span class="sm"><b>${esc(titleOf(h))}${(conflicts().get(h.id) || {}).mark ? ` <span class="cw">${warnI()}</span>` : ""}</b><span>${n ? `${n} ${n === 1 ? "Nacht" : "Nächte"} · ` : ""}${fmtRange(h.sdate, h.edate || h.sdate)}${h.stime ? ` · ab ${esc(h.stime)}` : ""}${isOpen(h) ? ` · <span class="flag">${h.tentative ? "Vorschlag" : "Details fehlen"}</span>` : ""}</span></span><span class="chev">${ui("chev")}</span></button>`;
+            return `<button class="stay ${isOpen(h) ? "tent" : ""}" type="button" data-open="${esc(h.id)}"><span class="si">${icon("hotel")}</span><span class="sm"><b>${esc(titleOf(h))}${(conflicts().get(h.id) || {}).mark ? ` <span class="cw">${warnI()}</span>` : ""}</b><span>${n ? `${n} ${n === 1 ? "Nacht" : "Nächte"} · ` : ""}${fmtRange(h.sdate, h.edate || h.sdate)}${h.stime ? ` · ab ${esc(h.stime)}` : ""}${isOpen(h) ? ` · <span class="flag">${openLabel(h)}</span>` : ""}</span></span><span class="chev">${ui("chev")}</span></button>`;
           }).join("") + (S.rFilter === "all" || S.rFilter === "hotel" || S.rFilter === "open" ? openSt.map((m) => `<button class="stay open" type="button" data-addstay="${esc(JSON.stringify({ place: st.name, s: m.from, e: m.to }))}"><span class="si">${ui("plus", 1.6)}</span><span class="sm"><b>Unterkunft offen</b><span>${m.nights} ${m.nights === 1 ? "Nacht" : "Nächte"} · ${fmtRange(m.from, m.to)}</span></span><span class="chev">${ui("chev")}</span></button>`).join("") : "");
         return hopFor(st) + gapsBefore(st.key, false) + `<details class="station stop ${isHere ? "now" : ""} ${past ? "past" : ""}" data-st="${esc(sk)}" ${opened.has(sk) ? "open" : ""}>
           <summary class="sthead">
@@ -1771,9 +1779,10 @@ function renderDetail() {
   ].join("");
   box.innerHTML = `
     <div class="top"><button class="back" type="button" id="d-back">${ui("back", 1.6)}Zurück</button>
-      ${canEdit() ? `<button class="btn" type="button" id="d-edit">Bearbeiten</button>` : ""}</div>
+      ${canEdit() ? `<span style="display:flex;gap:8px;align-items:center">${e.move || e.type === "hotel" ? `<button class="btn quiet" type="button" id="d-openmark">${isOpen(e) ? "Ist geklärt" : "Noch offen"}</button>` : ""}<button class="btn" type="button" id="d-edit">Bearbeiten</button></span>` : ""}</div>
     <div><div class="dt-kind"><i class="dotc ${pc(e.country)}"></i>${esc(TYPE[e.type].label)}${e.country ? " · " + phaseName(e.country) : ""}${e.tentative ? " · Vorschlag" : ""}</div><h1 class="dt-title">${esc(titleOf(e))}</h1></div>
     ${confHtml(e)}
+    ${(e.move || e.type === "hotel") && isOpen(e) ? `<div class="callout"><b>Noch offen:</b> ${e.placeholder ? "es fehlen noch Details" : e.tentative ? "als noch nicht fix markiert" : "keine Uhrzeit, keine Buchungsnummer und kein Ticket"}. ${canEdit() ? "Sobald es feststeht, oben auf „Ist geklärt“ tippen." : ""}</div>` : ""}
     ${core}
     <div class="actions">
       ${atts[0] ? `<button class="btn solid" type="button" id="d-ticket">${ui("ticket")}Ticket öffnen</button>` : ""}
@@ -1796,6 +1805,11 @@ function renderDetail() {
     catch { toast("Speichern ging nicht."); }
   });
   const ed = $("d-edit"); if (ed) ed.addEventListener("click", () => openForm(S.events.find((x) => x.id === e.id)));
+  const om = $("d-openmark"); if (om) om.addEventListener("click", async () => {
+    const was = isOpen(e);
+    try { await S.db.collection("events").doc(e.id).update(was ? { tentative: false, placeholder: false, confirmed: true } : { tentative: true, confirmed: false }); toast(was ? "Als geklärt markiert" : "Steht jetzt unter „Offen“"); }
+    catch { toast("Speichern ging nicht."); }
+  });
   const tk = $("d-ticket"); if (tk) tk.addEventListener("click", () => openAttachment(atts[0]));
   const cp = $("copybk"); if (cp) cp.addEventListener("click", async () => {
     try { await navigator.clipboard.writeText(e.booking); toast("Kopiert"); }
@@ -2040,7 +2054,7 @@ $("form").addEventListener("submit", async (ev) => {
       from: move ? $("f-from").value.trim() : "", to: move ? $("f-to").value.trim() : "", place: move ? "" : $("f-place").value.trim(), laundry: t === "hotel" ? $("f-laundry").value : "", stopover: move ? $("f-stop").value : "",
       sdate, stime: $("f-stime").value, edate, etime: $("f-etime").value, tz: $("f-tz").value,
       address: $("f-address").value.trim(), gps, booking: $("f-booking").value.trim(), links: parseLinks($("f-links").value), notes: $("f-notes").value.trim(),
-      attachments: atts, placeholder: false, tentative: $("f-tentative").checked, updatedAt: new Date().toISOString()
+      attachments: atts, placeholder: false, tentative: $("f-tentative").checked, confirmed: $("f-tentative").checked ? false : !!(S.editing && S.editing.confirmed), updatedAt: new Date().toISOString()
     };
     const ref = S.editing ? S.db.collection("events").doc(S.editing.id) : S.db.collection("events").doc();
     await ref.set(doc);
@@ -3608,7 +3622,7 @@ document.addEventListener("click", async (ev) => {
   catch { window.open(url, "_blank", "noopener"); }
 }, true);
 
-const APP_VERSION = "35";
+const APP_VERSION = "36";
 /* ---------- Render & boot ---------- */
 function render() {
   _sorted = null; _conf = null; _pres = null;
