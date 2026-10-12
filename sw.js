@@ -1,5 +1,5 @@
 // Reise – keeps the app available offline. Stores no personal data.
-const CACHE = "reise-v53";
+const CACHE = "reise-v57";
 const FILES = ["./", "./index.html", "./manifest.webmanifest", "./koffer-180.png", "./koffer-192.png", "./koffer-512.png", "./koffer-maskable-512.png", "./pdf.min.mjs", "./pdf.worker.min.mjs"];
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES.map((f) => new Request(f, { cache: "reload" })))).then(() => self.skipWaiting())); });
 self.addEventListener("activate", (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE && k !== "reise-share").map((k) => caches.delete(k)))).then(() => self.clients.claim())); });
@@ -23,6 +23,8 @@ self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (url.origin !== location.origin || e.request.headers.has("authorization")) return;   // Abgleich nie aus dem Speicher
   // The page itself: newest version when online, saved copy when offline.
+  // teilen.html (Ansicht für Freunde): nur aus dem Netz, und nie als App-Seite speichern
+  if (url.pathname.endsWith("/teilen.html")) return;
   if (e.request.mode === "navigate") {
     e.respondWith(fetch(e.request, { cache: "no-cache" }).then((res) => {
       if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put("./index.html", copy)); }
