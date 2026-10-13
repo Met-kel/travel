@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="referrer" content="no-referrer">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' blob: data: https://*.workers.dev https://api.open-meteo.com https://cdn.jsdelivr.net https://*.currency-api.pages.dev https://api.frankfurter.dev; object-src 'none'; base-uri 'self'; form-action 'none'">
-<link rel="manifest" href="manifest.webmanifest?v=59">
+<link rel="manifest" href="manifest.webmanifest?v=60">
 <link rel="icon" href="koffer-192.png">
 <link rel="apple-touch-icon" href="koffer-180.png">
 <title>Reise</title>
@@ -141,11 +141,14 @@ a { color: inherit; }
 .dw-card .dw-cd { font-weight: 300; font-size: 30px; line-height: 1.1; margin-top: 4px; font-variant-numeric: tabular-nums; }
 .dw-card .dw-cd small { font-size: 15px; margin-left: 2px; }
 .dw-it.past .dw-card { opacity: .55; }
-/* noch nicht fix: schraffiert und gestrichelt umrandet */
-.dw-it.tent .dw-card { background: repeating-linear-gradient(135deg, var(--sunk) 0 7px, color-mix(in srgb, var(--line-strong) 70%, var(--sunk)) 7px 8.5px); outline: 1.5px dashed var(--line-strong); outline-offset: -1.5px; }
-.dw-it.tent .dw-dot { background: var(--bg); border-style: dashed; }
-.dw-it.tent.center .dw-card { background: repeating-linear-gradient(135deg, var(--ink) 0 7px, color-mix(in srgb, var(--ink) 78%, var(--bg)) 7px 8.5px); outline-color: var(--ink); }
-.dw-it.tent.center .dw-dot { background: var(--bg); border-color: var(--ink); }
+/* noch nicht fix (Vorschlag): nur gestrichelter Umriss, kein Hintergrund, dünnere Schrift; wird nie schwarz wie ein fixer Termin */
+.dw-it.tent .dw-card, .dw-it.tent.center .dw-card { background: transparent; outline: 1.5px dashed var(--line-strong); outline-offset: -1.5px; color: var(--ink); }
+.dw-it.tent.center .dw-card { outline-color: var(--ink); }
+.dw-it.tent .dw-card .dw-k, .dw-it.tent .dw-card .dw-s, .dw-it.tent .dw-card .dw-cd small, .dw-it.tent.center .dw-card .dw-k, .dw-it.tent.center .dw-card .dw-s, .dw-it.tent.center .dw-card .dw-cd small { color: var(--muted); }
+.dw-it.tent .dw-card b { font-weight: 400; }
+.dw-tag { display: block; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.dw-it.tent .dw-dot, .dw-it.tent.center .dw-dot { background: var(--bg); border-style: dashed; border-color: var(--muted); }
+.dw-it.tent.center .dw-dot { border-color: var(--ink); }
 /* Ablauf eines Tagesplans direkt am Faden, unter seinem Termin */
 .dw-step { position: relative; display: grid; grid-template-columns: 52px 24px minmax(0, 1fr); align-items: center; min-height: 30px; }
 .dw-step::before { content: ""; position: absolute; left: 63.25px; top: 0; bottom: 0; width: 1.5px; background: var(--line-strong); }
@@ -163,7 +166,7 @@ a { color: inherit; }
 .hmrow .tilebtn { border-bottom: 0; }
 .hmplus { flex: none; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line-strong); background: none; color: var(--ink); display: grid; place-items: center; cursor: pointer; }
 .hmplus svg { width: 16px; height: 16px; }
-.row.tent { background: repeating-linear-gradient(135deg, transparent 0 7px, color-mix(in srgb, var(--line-strong) 45%, transparent) 7px 8px); }
+.row.tent .t { color: var(--muted); }
 .row.tent .ti { font-weight: 400; }
 .dw-it.center .dw-card { background: var(--ink); color: var(--bg); opacity: 1; }
 .dw-it.center .dw-card .dw-k, .dw-it.center .dw-card .dw-s, .dw-it.center .dw-card .dw-cd small { color: color-mix(in srgb, var(--bg) 72%, transparent); }
@@ -180,6 +183,7 @@ a { color: inherit; }
 .dw-fade.b { bottom: 0; background: linear-gradient(transparent, var(--bg)); }
 .dw-acts { min-height: 44px; margin-top: 14px; }
 .wxb { background: none; border: 0; padding: 4px 0; font: inherit; font-size: 15px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.wxb.two { display: grid; gap: 2px; text-align: right; font-size: 13.5px; line-height: 1.3; }
 .ideas { display: grid; gap: 10px; }
 .idea { border: 1px solid var(--line); border-radius: 16px; padding: 14px 14px 12px; display: grid; gap: 8px; }
 .idea.done { opacity: .6; }
@@ -1292,7 +1296,13 @@ function renderHeute() {
   const now = Date.now();
   const over = S.trip && S.trip.end && td > S.trip.end;
   const wxPlace = S.loaded && S.trip && !over ? placeKey(placeOn(td) || "") : "", wxNow = wxPlace ? wxDay(wxPlace, td) : null;
-  let head = `<div><div class="sh"><div><div class="eyebrow">${f.wdl}, ${f.d}. ${f.mo}${over ? " · zurück" : ph ? " · " + esc(ph.name) : ""}</div><h1>${over ? "Willkommen zurück" : greeting()}</h1></div><div class="sh-r">${statusHtml()}${wxNow ? `<button class="wxb" type="button" id="hp-wx" aria-label="Wetter in ${esc(wxPlace)}">${esc(wxShort(wxNow))}</button>` : ""}</div></div></div>`;
+  // Reisetag: Wetter am Abfahrts- und am Zielort (erste Abfahrt, letztes Ziel des Tages)
+  const wxMv = S.loaded && S.trip && !over ? sortedEvents().filter((e) => e.move && !e.tentative && e.sdate === td && e.from && e.to) : [];
+  const wxA = wxMv.length ? placeKey(wxMv[0].from) : "", wxB = wxMv.length ? placeKey(wxMv[wxMv.length - 1].to) : "";
+  const wxTwo = wxA && wxB && norm(wxA) !== norm(wxB) ? [[wxA, wxDay(wxA, td)], [wxB, wxDay(wxB, td)]].filter((x) => x[1]) : [];
+  const wxHtml = wxTwo.length === 2 ? `<button class="wxb two" type="button" id="hp-wx" aria-label="Wetter in ${esc(wxA)} und ${esc(wxB)}">${wxTwo.map(([p, w]) => `<span>${esc(p)} ${esc(wxShort(w))}</span>`).join("")}</button>`
+    : wxNow ? `<button class="wxb" type="button" id="hp-wx" aria-label="Wetter in ${esc(wxPlace)}">${esc(wxShort(wxNow))}</button>` : "";
+  let head = `<div><div class="sh"><div><div class="eyebrow">${f.wdl}, ${f.d}. ${f.mo}${over ? " · zurück" : ph ? " · " + esc(ph.name) : ""}</div><h1>${over ? "Willkommen zurück" : greeting()}</h1></div><div class="sh-r">${statusHtml()}${wxHtml}</div></div></div>`;
   const bindTop = () => {};   // „Alle Reisen“ steht in der Leiste oben (render)
   if (!S.loaded) { s.innerHTML = head; bindTop(); return; }
   if (over) {
@@ -1399,7 +1409,11 @@ function renderHeute() {
   $("hp-photos")?.addEventListener("click", () => openPhotos(phPlace));
   s.querySelectorAll("[data-papers]").forEach((b) => b.addEventListener("click", () => openPapers(b.dataset.papers, b.dataset.pmode)));
   bindPaperCards(s);
-  $("hp-wx")?.addEventListener("click", () => { const w = wxDay(wxPlace, td); if (w) toast(`${wxLong(w, wxPlace)} · Wetterdaten: Open-Meteo.com`); });
+  $("hp-wx")?.addEventListener("click", () => {
+    const list = wxTwo.length === 2 ? wxTwo : [[wxPlace, wxDay(wxPlace, td)]];
+    const txt = list.filter((x) => x[1]).map(([p, w]) => wxLong(w, p)).join(" · ");
+    if (txt) toast(`${txt} · Wetterdaten: Open-Meteo.com`);
+  });
   bindRemRows(s);
   const h2 = $("hp-open"); if (h2) h2.addEventListener("click", () => { S.rFilter = "open"; S.rView = "list"; setTab("reise"); });
   const h3 = $("hp-save"); if (h3) h3.addEventListener("click", () => openSettings("trip", "sync"));
@@ -4598,11 +4612,11 @@ function dayWheelHtml(td, evs, now, next, running) {
       cd = `<span class="dw-cd" id="cd" data-start="${e.start}" data-sdate="${localDateIn(e.start, deviceTz())}" data-live="${isRun || e.noTime ? 0 : 1}">${cdHtml(cdp)}</span>`;
     }
     const lbl = hotel && x.end && e.etime ? "Check-out spätestens" : (x.label || TYPE[e.type].label);
-    const k = [isRun || isBusy ? "Gerade" : isNext ? "Als Nächstes" : past ? "Vorbei" : "", tent ? openLabel(e) : "", lbl].filter(Boolean).join(" · ");
+    const k = [isRun || isBusy ? "Gerade" : isNext ? "Als Nächstes" : past ? "Vorbei" : "", lbl].filter(Boolean).join(" · ");
     // Fahrt in ein anderes Land: offene Einreise-Aufgaben als kleine Zeile in der Karte
     const ck = !x.end && crossInto(e), openP = ck ? papersFor(ck).filter((p) => p.kind === "einreise" && paperOpen(p)).length : 0;
     const steps = x.end || x.later ? [] : dwSteps(e);
-    return `<div class="dw-it snap ${past ? "past" : ""} ${tent ? "tent" : ""}" data-dwi="${i}" data-dwid="${esc(e.id)}"><span class="dw-t">${t}</span><span class="dw-dot"></span><button type="button" class="dw-card"><span class="dw-k">${esc(k)}</span><b>${esc(titleOf(e))}</b><span class="dw-s">${esc(subOf(e))}${openP ? ` · <span class="dw-warn">Einreise: ${openP} offen</span>` : ""}</span>${cd}</button></div>`
+    return `<div class="dw-it snap ${past ? "past" : ""} ${tent ? "tent" : ""}" data-dwi="${i}" data-dwid="${esc(e.id)}"><span class="dw-t">${t}</span><span class="dw-dot"></span><button type="button" class="dw-card"><span class="dw-k">${esc(k)}</span>${tent ? `<span class="dw-tag">${esc(openLabel(e))}</span>` : ""}<b>${esc(titleOf(e))}</b><span class="dw-s">${esc(subOf(e))}${openP ? ` · <span class="dw-warn">Einreise: ${openP} offen</span>` : ""}</span>${cd}</button></div>`
       + steps.map((s) => `<div class="dw-step ${tent ? "tent" : ""} ${s.done ? "done" : ""} ${past ? "past" : ""}"><span class="dw-t"></span><span class="dw-sd"></span><button type="button" class="dw-sn" data-dwstep="${esc(e.id)}">${esc(s.name)}</button></div>`).join("");
   }).join("");
   S.dwFocus = S.dwPick && S.dwPick.day === td && Date.now() - S.dwPick.at < 10 * 60000 && (S.dwPick.id === "gap" ? !!freeNow : items.some((x) => x.e && x.e.id === S.dwPick.id)) ? S.dwPick.id : focus;
@@ -6079,7 +6093,7 @@ function syncBoot() {
     else if (SY.dirty) { clearTimeout(SY.timer); syncNow("leave"); }
   });
 }
-const APP_VERSION = "59";
+const APP_VERSION = "60";
 // angezeigt als 1.x: Build 1 = 1.0, 2 = 1.1, 3 = 1.2 … (der Cache zählt weiter mit der Build-Nummer)
 function appVersionShown() { return "1." + Math.max(0, +APP_VERSION - 1); }
 /* ---------- Render & boot ---------- */
