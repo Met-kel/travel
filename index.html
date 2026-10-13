@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="referrer" content="no-referrer">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' blob: data: https://*.workers.dev https://api.open-meteo.com https://cdn.jsdelivr.net https://*.currency-api.pages.dev https://api.frankfurter.dev; object-src 'none'; base-uri 'self'; form-action 'none'">
-<link rel="manifest" href="manifest.webmanifest?v=57">
+<link rel="manifest" href="manifest.webmanifest?v=59">
 <link rel="icon" href="koffer-192.png">
 <link rel="apple-touch-icon" href="koffer-180.png">
 <title>Reise</title>
@@ -141,6 +141,30 @@ a { color: inherit; }
 .dw-card .dw-cd { font-weight: 300; font-size: 30px; line-height: 1.1; margin-top: 4px; font-variant-numeric: tabular-nums; }
 .dw-card .dw-cd small { font-size: 15px; margin-left: 2px; }
 .dw-it.past .dw-card { opacity: .55; }
+/* noch nicht fix: schraffiert und gestrichelt umrandet */
+.dw-it.tent .dw-card { background: repeating-linear-gradient(135deg, var(--sunk) 0 7px, color-mix(in srgb, var(--line-strong) 70%, var(--sunk)) 7px 8.5px); outline: 1.5px dashed var(--line-strong); outline-offset: -1.5px; }
+.dw-it.tent .dw-dot { background: var(--bg); border-style: dashed; }
+.dw-it.tent.center .dw-card { background: repeating-linear-gradient(135deg, var(--ink) 0 7px, color-mix(in srgb, var(--ink) 78%, var(--bg)) 7px 8.5px); outline-color: var(--ink); }
+.dw-it.tent.center .dw-dot { background: var(--bg); border-color: var(--ink); }
+/* Ablauf eines Tagesplans direkt am Faden, unter seinem Termin */
+.dw-step { position: relative; display: grid; grid-template-columns: 52px 24px minmax(0, 1fr); align-items: center; min-height: 30px; }
+.dw-step::before { content: ""; position: absolute; left: 63.25px; top: 0; bottom: 0; width: 1.5px; background: var(--line-strong); }
+.dw-step .dw-sd { justify-self: center; width: 5px; height: 5px; border-radius: 50%; background: var(--faint); position: relative; z-index: 1; }
+.dw-step .dw-sn { border: 0; background: none; font: inherit; font-size: 13.5px; color: var(--ink); text-align: left; padding: 4px 0 4px 18px; cursor: pointer; overflow-wrap: anywhere; }
+.dw-step.tent .dw-sn { color: var(--muted); font-style: italic; }
+.dw-step.tent .dw-sd { background: none; border: 1px dashed var(--faint); width: 6px; height: 6px; }
+.dw-step.done .dw-sn { color: var(--faint); text-decoration: line-through; }
+.dw-step.past .dw-sn { color: var(--faint); }
+.dw-step:last-of-type { margin-bottom: 8px; }
+.dw-card .dw-warn { color: var(--wood); }
+.dw-it.center .dw-card .dw-warn { color: inherit; }
+/* Ausgaben heute: Zeile mit „+“ */
+.hmrow { display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--line); }
+.hmrow .tilebtn { border-bottom: 0; }
+.hmplus { flex: none; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line-strong); background: none; color: var(--ink); display: grid; place-items: center; cursor: pointer; }
+.hmplus svg { width: 16px; height: 16px; }
+.row.tent { background: repeating-linear-gradient(135deg, transparent 0 7px, color-mix(in srgb, var(--line-strong) 45%, transparent) 7px 8px); }
+.row.tent .ti { font-weight: 400; }
 .dw-it.center .dw-card { background: var(--ink); color: var(--bg); opacity: 1; }
 .dw-it.center .dw-card .dw-k, .dw-it.center .dw-card .dw-s, .dw-it.center .dw-card .dw-cd small { color: color-mix(in srgb, var(--bg) 72%, transparent); }
 .dw-it.gap { min-height: 96px; }
@@ -1263,7 +1287,7 @@ function renderHeute() {
   const s = $("s-heute");
   const td = today();
   const f = fmtDay(td);
-  const ph = phaseOn(td);
+  const ph = hereNow();   // am Reisetag bis zur Ankunft noch das Land, in dem man ist
   const evs = sortedEvents();
   const now = Date.now();
   const over = S.trip && S.trip.end && td > S.trip.end;
@@ -1296,7 +1320,10 @@ function renderHeute() {
   }
   if (!hasData()) { s.innerHTML = head + `<div class="empty"><b>Gemeinsame Daten sind hier nicht verfügbar.</b><span>Der Speicher dieses Browsers ist nicht verfügbar.</span></div>`; return; }
   const running = evs.find((e) => e.move && e.end && e.start <= now && now < e.end);
-  const next = running || evs.find((e) => e.start + (e.noTime ? 86400000 : 0) > now);
+  // Als Nächstes: ein Check-in von heute zählt erst nach der Ankunft (sonst wäre das Hotel am Ziel „vor“ dem Flug dran)
+  const dmT = dayMoves(td, evs), effAt = (e) => e.type === "hotel" && e.sdate === td ? checkInAt(e, td, dmT) : e.start + (e.noTime ? 86400000 : 0);
+  const ordAt = (e) => e.type === "hotel" && e.sdate === td ? checkInAt(e, td, dmT) : e.start;
+  const next = running || evs.filter((e) => effAt(e) > now).sort((a, b) => ordAt(a) - ordAt(b))[0];
   let hero = "";
   const hasDay = dayItems(td, evs, now, next, running).some((x) => x.k !== "now");
   const duringTrip = S.trip && td >= S.trip.start && td <= S.trip.end;
@@ -1310,30 +1337,20 @@ function renderHeute() {
   // today + tomorrow agenda
   const tm = dateOfDayNumber(dayNumber(td) + 1);
   // Morgen: zum Aufklappen
-  const tmEvs = evs.filter((e) => e.sdate === tm), tmW = wxPlace ? wxDay(placeKey(placeOn(tm) || wxPlace), tm) : null;
+  const tmEvs = dayOrder(evs.filter((e) => e.sdate === tm), tm, evs), tmW = wxPlace ? wxDay(placeKey(placeOn(tm) || wxPlace), tm) : null;
   const tmDay = fmtDay(tm);
   const agendaHtml = S.trip && tm <= S.trip.end && tm >= S.trip.start || tmEvs.length ? `<details class="tips tile" id="hp-morgen" ${S.morgenOpen ? "open" : ""}><summary><span class="tt"><span>Morgen · ${tmDay.wd} ${tmDay.d}. ${tmDay.mo}</span><small>${tmEvs.length ? `${tmEvs.find((e) => e.stime) ? `ab ${esc(tmEvs.find((e) => e.stime).stime)} · ` : ""}${tmEvs.length} ${tmEvs.length === 1 ? "Termin" : "Termine"}` : "nichts geplant"}${tmW ? " · " + esc(wxShort(tmW)) : ""}</small></span><span>+</span></summary><div class="tilein">${tmEvs.length ? `<ul class="rows">${tmEvs.map((e) => rowHtml(e, now, false)).join("")}</ul>` : `<p class="note" style="margin:0">Noch nichts geplant.</p>`}${tmW ? `<p class="note" style="margin:0">${esc(wxLong(tmW, placeKey(placeOn(tm) || wxPlace)))}</p>` : ""}</div></details>` : "";
   const before = S.trip && td < S.trip.start;
   const during = S.trip && td >= S.trip.start && td <= S.trip.end;
-  // what is planned today: the steps of today's day plans
-  let planHtml = "";
-  if (!before) {
-    const dayEvs = evs.filter((e) => e.sdate === td && !e.move);
-    const blocks = dayEvs.map((e) => ({ e, steps: S.tips.filter((t) => t.event === e.id && !t.alt && !["essen", "ausgehen"].includes(t.cat)).sort(tipOrder) })).filter((x) => x.steps.length);
-    if (blocks.length) {
-      const b0 = blocks[0];
-      const name = (t) => { const x = String(t.text || ""), i = x.indexOf(": "); return i > 0 && i <= 48 ? x.slice(0, i) : x.length > 46 ? x.slice(0, 44) + " …" : x; };
-      planHtml = `<div><p class="label">Heute geplant</p><ol class="hsteps">${b0.steps.slice(0, 5).map((t) => `<li class="${t.done ? "done" : ""}">${esc(name(t))}</li>`).join("")}</ol>
-        <button class="linkbtn" type="button" data-open="${esc(b0.e.id)}" style="padding:8px 0 0">${b0.steps.length > 5 ? `Alle ${b0.steps.length} ansehen` : "Ablauf ansehen"} · ${esc(titleOf(b0.e))}</button></div>`;
-    }
-  }
-  // spending today
+  // Ablauf eines Tagesplans steht jetzt im Tagesfaden beim Termin selbst (dwSteps)
+  const planHtml = "";
+  // Ausgaben heute: eine ruhige Zeile mit „+“ für eine Zahlung
   let moneyHtml = "";
   if (during && S.kasse) {
     const xs = S.expenses.filter((x) => !kIsSettle(x) && x.date === td);
     let sum = 0, est = false; for (const x of xs) { const a = kAcct(S.kasse, x); if (a.v != null) { sum += a.v; if (a.est) est = true; } }
     const avg = kDayAvg(S.kasse);
-    moneyHtml = `<section class="hcard hmoney"><div><p class="hc-h">Heute ausgegeben</p><span class="v">${xs.length ? `${est ? "≈ " : ""}${kfmt(kr2(sum), S.kasse.accountCur)}` : "noch nichts"}</span>${avg && (avg.sum || xs.length) ? `<span class="avg">Ø pro Tag bisher: ${kAvgTxt(avg, S.kasse.accountCur)}</span>` : ""}</div>${canEdit() ? `<button class="btn" type="button" id="hpay">${ui("plus")}Zahlung</button>` : ""}</section>`;
+    moneyHtml = `<div class="hmrow"><button class="tilebtn" type="button" id="hp-kasse"><span class="tt"><span>Heute ausgegeben</span><small>${xs.length ? `${est ? "≈ " : ""}${kfmt(kr2(sum), S.kasse.accountCur)}` : "noch nichts"}${avg && (avg.sum || xs.length) ? ` · Ø pro Tag ${kAvgTxt(avg, S.kasse.accountCur)}` : ""}</small></span></button>${canEdit() ? `<button class="hmplus" type="button" id="hpay" aria-label="Zahlung eintragen">${ui("plus")}</button>` : ""}</div>`;
   }
   // before departure: three things to check
   let prepHtml = "";
@@ -1356,23 +1373,26 @@ function renderHeute() {
   const remsHtml = remTodayHtml();
   // Unterlagen nur, wenn sie heute (oder morgen) gebraucht werden: Einreise am Reisetag und am Tag davor,
   // Tax-free und Codes im Land, in dem man heute ist (unter den Ausgaben, aber als eigene Karte)
-  const cr = S.trip && !over ? paperCrossing() : null;
+  // Einreise erst kurz vor der Ankunft (1 Std.); davor über „Einreise“ bei der Fahrt im Tagesfaden
+  const cr = S.trip && !over ? entryNow() : null;
   const crList = cr ? papersFor(cr.key).filter((p) => p.kind === "einreise") : [];
-  const entryHtml = crList.length ? `<section class="hcard"><div class="hc-row"><p class="hc-h">Einreise ${esc(phaseName(cr.key))} · ${esc(dayWord(cr.day))}</p><button class="linkbtn" type="button" data-papers="${esc(cr.key)}" data-pmode="einreise">Alle</button></div>${paperMiniList(crList)}</section>` : "";
+  const entryHtml = crList.length ? `<section class="hcard"><div class="hc-row"><p class="hc-h">Einreise ${esc(phaseName(cr.key))} · bei der Ankunft</p><button class="linkbtn" type="button" data-papers="${esc(cr.key)}" data-pmode="einreise">Alle</button></div>${paperMiniList(crList)}</section>` : "";
+  // Unterlagen nur des Landes, in dem man gerade ist (Tax-free, Rabatte, Karten), als eine Zeile
   const hereKey = !over && ph ? ph.key : "";
-  const payList = hereKey ? papersFor(hereKey).filter((p) => paperKind(p) === "taxfree" || paperKind(p) === "rabatt") : [];
-  const payHtml = payList.length ? `<section class="hcard"><div class="hc-row"><p class="hc-h">Beim Bezahlen · ${esc(phaseName(hereKey))}</p><button class="linkbtn" type="button" data-papers="${esc(hereKey)}">Alle</button></div>${paperMiniList(payList)}</section>` : "";
-  const otherN = hereKey ? papersFor(hereKey).filter((p) => paperKind(p) === "karte" || paperKind(p) === "sonst").length : 0;
-  const papersHtml = otherN ? `<button class="tilebtn" type="button" id="hp-papers"><span class="tt"><span>Unterlagen</span><small>${esc(phaseName(hereKey))} · ${otherN} ${otherN === 1 ? "Karte oder Pass" : "Karten und Pässe"}</small></span>${ui("chev")}</button>` : "";
+  const hereP = hereKey ? papersFor(hereKey).filter((p) => p.kind !== "einreise") : [];
+  const payN = hereP.filter((p) => paperKind(p) === "taxfree" || paperKind(p) === "rabatt").length;
+  const papersHtml = hereP.length ? `<button class="tilebtn" type="button" id="hp-papers"><span class="tt"><span>Unterlagen</span><small>${esc(phaseName(hereKey))} · ${payN ? "Tax-free und Rabatte" + (hereP.length > payN ? ", Karten" : "") : hereP.length === 1 ? "1 Karte oder Pass" : hereP.length + " Karten und Pässe"}</small></span>${ui("chev")}</button>` : "";
+  const payHtml = "";
   // Fotos: während der Reise, für den Ort von heute
   const phPlace = during && canEdit() ? phHere() : "", phList = phPlace ? photosAt(phPlace) : [];
   const photosTile = phPlace ? `<button class="tilebtn" type="button" id="hp-photos"><span class="tt"><span>Fotos</span><small>${esc(phPlace)} · ${esc(phCountTxt(phList))}</small></span>${ui("chev")}</button>` : "";
   // unten ruhige Kacheln: morgen (aufklappbar), Unterlagen (nur wenn es welche gibt), Fotos und die gesammelten Ideen
-  const tilesHtml = agendaHtml || lumoHtml || papersHtml || photosTile ? `<div class="tiles">${agendaHtml}${papersHtml}${photosTile}${lumoHtml}</div>` : "";
-  s.innerHTML = head + hero + planHtml + entryHtml + remsHtml + moneyHtml + payHtml + prepHtml + (hint ? `<div class="callout">${hint}</div>` : "") + tilesHtml;
+  const tilesHtml = agendaHtml || lumoHtml || papersHtml || photosTile || moneyHtml ? `<div class="tiles">${agendaHtml}${moneyHtml}${papersHtml}${photosTile}${lumoHtml}</div>` : "";
+  s.innerHTML = head + hero + planHtml + entryHtml + remsHtml + payHtml + prepHtml + (hint ? `<div class="callout">${hint}</div>` : "") + tilesHtml;
   bindTop();
   bindRows(s);
   const hp = $("hpay"); if (hp) hp.addEventListener("click", () => kExpenseSheet(null));
+  $("hp-kasse")?.addEventListener("click", () => setTab("kasse"));
   const h1 = $("hp-pack"); if (h1) h1.addEventListener("click", () => setTab("packen"));
   $("hp-ideas")?.addEventListener("click", () => openIdeas(idPlace));
   $("hp-papers")?.addEventListener("click", () => openPapers(hereKey));
@@ -1419,6 +1439,7 @@ function tickCountdown() {
 function dayGroupsHtml(list, now, td, here, stKey) {
   const g = [];
   for (const e of list) { const last = g[g.length - 1]; if (last && last.d === e.sdate) last.a.push(e); else g.push({ d: e.sdate, a: [e] }); }
+  { const evs = sortedEvents(); for (const x of g) if (x.a.length > 1) x.a = dayOrder(x.a, x.d, evs); }   // Check-in nach der Ankunft
   if (!S.dayOpen) S.dayOpen = new Map();
   // jeder Tag eine Karte: vorbei = zu und leicht grau (antippen klappt auf), heute und später = offen; vor der Reise ist nichts grau
   const card = ({ d, a }) => {
@@ -1443,7 +1464,7 @@ function rowHtml(e, now, withDay, here, keep) {
   const past = !keep && isPast(e, now);   // keep: heute bleibt lesbar, auch was schon vorbei ist
   const flag = openLabel(e);
   const cf = conflicts().get(e.id), cw = cf && (cf.mark || S.rFilter === "dup");
-  return `<li><button class="row ${past ? "past" : ""}" type="button" data-open="${esc(e.id)}">
+  return `<li><button class="row ${past ? "past" : ""} ${e.tentative ? "tent" : ""}" type="button" data-open="${esc(e.id)}">
     <span class="t ${e.stime ? "" : "none"}">${withDay ? `${fmtDay(e.sdate).wd} ${fmtDay(e.sdate).d}.<br>` : ""}${e.stime ? esc(e.stime) : "–"}</span>
     <span class="m"><span class="ti">${esc(titleOf(e))}${cw ? ` <span class="cw" title="Möglicherweise doppelt">${warnI()}<span class="sr">${CONF_TXT[cf.kind]}</span></span>` : ""}</span><span class="su">${here ? "" : `<i class="dotc ${pc(e.country)}"></i>`}${esc(here ? rowSubIn(e, here) : subOf(e))}${(e.attachments || []).length ? " · Ticket" : ""}${flag ? ` · <span class="flag">${flag}</span>` : ""}</span></span>
     <span class="ic">${icon(e.type)}</span>
@@ -3765,7 +3786,7 @@ function renderSettings() {
     const rows = app ? [
       row("sync", "Reisedatei einlesen", lastIm ? "zuletzt " + kSince(lastIm) : ""),
       row("links", SET_PAGES.links, `${lm === "direct" ? "Direkt" : "Browser wählen"} · ${navApp() === "apple" ? "Apple Karten" : "Google Maps"}`),
-      row("privacy", SET_PAGES.privacy, "Version " + APP_VERSION),
+      row("privacy", SET_PAGES.privacy, "Version " + appVersionShown()),
       row("wipe", "Alles löschen", "", "danger")
     ] : [
       row("photos", "Fotos und Link", shareCfg() ? "Link für Freunde" : (S.photos || []).length ? `${(S.photos || []).length} ${(S.photos || []).length === 1 ? "Foto" : "Fotos"}` : ""),
@@ -3775,7 +3796,7 @@ function renderSettings() {
       row("offline", SET_PAGES.offline, "Notfall-Kopie"),
       row("names", SET_PAGES.names, esc(t.length > 2 ? `${t.length} Personen` : t.length === 1 ? `${t[0]}, allein` : t.join(" & "))),
       row("links", SET_PAGES.links, `${lm === "direct" ? "Direkt" : "Browser wählen"} · ${navApp() === "apple" ? "Apple Karten" : "Google Maps"}`),
-      row("privacy", SET_PAGES.privacy, "Version " + APP_VERSION),
+      row("privacy", SET_PAGES.privacy, "Version " + appVersionShown()),
       row("wipe", SET_PAGES.wipe, "", "danger")
     ];
     body = `<div><div class="dt-kind">${app ? "Alle Reisen" : esc((S.trip && S.trip.title) || "Reise")}</div><h1 class="dt-title" style="margin:0">Einstellungen</h1></div>
@@ -3862,7 +3883,7 @@ function renderSettings() {
       </ul>
       <p class="note">Der Webspace liefert nur die leere App aus und sieht nie ${duIhr("deine", "eure")} Daten. Nach dem ersten Öffnen läuft die App ohne Internet.</p>
       <label class="check"><input type="checkbox" id="st-wx" ${wxOn() ? "checked" : ""}> Wetter anzeigen. Wetterdaten von <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo.com</a>, ohne Konto und ohne Cookies.</label>
-      <p class="note">App-Version ${APP_VERSION}</p>`;
+      <p class="note">App-Version ${appVersionShown()}</p>`;
     else if (pg === "wipe") c = `
       <p class="note">Löschen betrifft nur dieses Handy. Sichere vorher mit „Alles sichern“, wenn du die Daten behalten willst.</p>
       ${S.confirmWipe === "trip" ? `<div class="confirm">„${esc((S.trip && S.trip.title) || "Diese Reise")}“ mit Tickets und Kasse von diesem Gerät löschen? <button class="btn danger" type="button" id="st-wipe-yes">Löschen</button><button class="btn quiet" type="button" id="st-wipe-no">Abbrechen</button></div>`
@@ -4508,11 +4529,34 @@ function nextHeroHtml(next, running, now) {
 }
 
 /* ---------- Tagesfaden auf „Heute“ ---------- */
+// Reihenfolge an einem Tag: Check-in frühestens nach der letzten Ankunft, Check-out spätestens vor der ersten Abfahrt.
+// Nur fürs Ordnen; angezeigt wird die eingetragene Zeit („ab 15:00“, „bis 11:00“).
+function dayMoves(td, evs) {
+  const ms = evs.filter((m) => m.move && !m.tentative);
+  const arr = [], dep = [];
+  for (const m of ms) {
+    const a = m.end || (m.stime ? m.start + 3600000 : null);
+    if (a != null && localDateIn(a, m.endTz) === td) arr.push(a);
+    if (m.sdate === td && m.stime) dep.push(m.start);
+  }
+  return { lastArr: arr.length ? Math.max(...arr) : null, firstDep: dep.length ? Math.min(...dep) : null };
+}
+function checkInAt(e, td, dm) {
+  const base = e.noTime ? zonedToUtc(td, "15:00", e.startTz) : e.start;   // ohne Zeit: übliche Check-in-Zeit
+  return dm.lastArr != null && dm.lastArr >= base ? dm.lastArr + 60000 : base;
+}
+function checkOutAt(e, dm) { return dm.firstDep != null && dm.firstDep <= e.end ? dm.firstDep - 60000 : e.end; }
+// Einträge eines Tages in der Reihenfolge, wie der Tag abläuft (für „Morgen“ und die Tageskarten unter „Reise“)
+function dayOrder(list, td, evs) {
+  const dm = dayMoves(td, evs);
+  const key = (e) => e.type === "hotel" && e.sdate === td ? checkInAt(e, td, dm) : e.start;
+  return list.slice().sort((a, b) => key(a) - key(b) || a.start - b.start);
+}
 function dayItems(td, evs, now, next, running) {
-  const tz = deviceTz(), items = [];   // wie today(): die Uhr des Handys
+  const tz = deviceTz(), items = [], dm = dayMoves(td, evs);   // wie today(): die Uhr des Handys
   for (const e of evs) {
-    if (e.sdate === td) items.push({ k: "ev", e, at: e.noTime ? zonedToUtc(td, "00:00", tz) - 1 : e.start, label: e.type === "hotel" ? "Check-in" : "" });
-    else if (e.end && e.sdate < td && localDateIn(e.end, e.endTz) === td && (e.type === "hotel" || e.move)) items.push({ k: "ev", e, at: e.end, end: true, label: e.type === "hotel" ? "Check-out" : "Ankunft" });
+    if (e.sdate === td) items.push({ k: "ev", e, at: e.type === "hotel" ? checkInAt(e, td, dm) : e.noTime ? zonedToUtc(td, "00:00", tz) - 1 : e.start, label: e.type === "hotel" ? "Check-in" : "" });
+    else if (e.end && e.sdate < td && localDateIn(e.end, e.endTz) === td && (e.type === "hotel" || e.move)) items.push({ k: "ev", e, at: e.type === "hotel" ? checkOutAt(e, dm) : e.end, end: true, label: e.type === "hotel" ? "Check-out" : "Ankunft" });
     else if (running && e.id === running.id) items.push({ k: "ev", e, at: e.start });
   }
   items.sort((a, b) => a.at - b.at);
@@ -4534,27 +4578,46 @@ function dayWheelHtml(td, evs, now, next, running) {
   const items = dayItems(td, evs, now, next, running), tz = deviceTz();
   const hm = (ms, z) => hmIn(ms, z || tz);
   // im Mittelpunkt steht, was jetzt ist: eine laufende Fahrt, sonst freie Zeit (mind. 2 Std.), sonst das Nächste
-  const freeNow = !running && items.find((x) => x.k === "gap" && x.at <= now + 60000 && now < x.to);
-  const focus = running ? running.id : freeNow ? "gap" : next ? next.id : null;
+  // ein Termin mit Endzeit, der gerade läuft (z. B. Tagesplan 9–15 Uhr), gilt als „Gerade“, nicht als vorbei
+  const busy = !running ? (items.find((x) => x.k === "ev" && !x.end && !x.e.move && x.e.type !== "hotel" && x.e.etime && x.e.end && x.e.start <= now && now < x.e.end) || {}).e : null;
+  const freeNow = !running && !busy && items.find((x) => x.k === "gap" && x.at <= now + 60000 && now < x.to);
+  const focus = running ? running.id : busy ? busy.id : freeNow ? "gap" : next ? next.id : null;
   S.dwItems = items;
   const html = items.map((x, i) => {
     if (x.k === "now") return `<div class="dw-now"><span class="dw-t">${hm(now)}</span><i></i><span>Jetzt</span></div>`;
     if (x.k === "gap") { const h = Math.round((x.to - x.at) / 1800000) / 2; return `<div class="dw-it gap snap" data-dwi="${i}" ${x === freeNow ? 'data-dwid="gap"' : ""}><span class="dw-t">${hm(x.at)}</span><span class="dw-dot"></span><button type="button" class="dw-gap">${x === freeNow ? "Jetzt frei" : "Frei"}${x.last ? (items.some((y) => y.k === "ev") ? " · heute nichts mehr geplant" : " · heute nichts geplant") : ` bis ${hm(x.to)} · ${String(h).replace(".", ",")} Std.`}</button></div>`; }
-    const e = x.e, isNext = next && e.id === next.id, isRun = running && e.id === running.id, past = !isRun && !isNext && !(x.end && !e.etime) && isPast(e, now);
+    const e = x.e, isNext = next && e.id === next.id, isBusy = !!busy && e.id === busy.id && !x.end, isRun = running && e.id === running.id, past = !isRun && !isNext && !isBusy && !(x.end && !e.etime) && isPast(e, now);
     const f = fmtDay(e.sdate);
-    const t = x.later ? `${f.wd} ${f.d}.<br>${e.stime ? esc(e.stime) : ""}` : x.end ? (e.etime ? esc(hm(x.at, e.endTz)) : "–") : e.noTime ? "–" : esc(e.stime || "–");
-    let cd = "";
+    const hotel = e.type === "hotel", tent = !!e.tentative;
+    // Hotel: ein Zeitfenster, keine feste Zeit („ab 15:00“ einchecken, „bis 11:00“ auschecken)
+    const t = x.later ? `${f.wd} ${f.d}.<br>${e.stime ? esc(e.stime) : ""}` : x.end ? (e.etime ? `${hotel ? "bis<br>" : ""}${esc(hm(e.end, e.endTz))}` : "–") : e.noTime ? "–" : `${hotel ? "ab<br>" : ""}${esc(e.stime)}`;
+    let cd = isBusy ? `<span class="dw-cd"><small style="margin:0">bis ${esc(hm(e.end, e.endTz))}</small></span>` : "";
     if (isNext || isRun) {
       let cdp = isRun ? ["Unterwegs", ""] : countdownParts(e.start - now);
       if (!isRun && e.noTime && localDateIn(now, e.startTz) === e.sdate) cdp = ["Heute", ""];
       cd = `<span class="dw-cd" id="cd" data-start="${e.start}" data-sdate="${localDateIn(e.start, deviceTz())}" data-live="${isRun || e.noTime ? 0 : 1}">${cdHtml(cdp)}</span>`;
     }
-    const k = [isRun ? "Gerade" : isNext ? "Als Nächstes" : past ? "Vorbei" : "", x.label || TYPE[e.type].label].filter(Boolean).join(" · ");
-    return `<div class="dw-it snap ${past ? "past" : ""}" data-dwi="${i}" data-dwid="${esc(e.id)}"><span class="dw-t">${t}</span><span class="dw-dot"></span><button type="button" class="dw-card"><span class="dw-k">${esc(k)}</span><b>${esc(titleOf(e))}</b><span class="dw-s">${esc(subOf(e))}</span>${cd}</button></div>`;
+    const lbl = hotel && x.end && e.etime ? "Check-out spätestens" : (x.label || TYPE[e.type].label);
+    const k = [isRun || isBusy ? "Gerade" : isNext ? "Als Nächstes" : past ? "Vorbei" : "", tent ? openLabel(e) : "", lbl].filter(Boolean).join(" · ");
+    // Fahrt in ein anderes Land: offene Einreise-Aufgaben als kleine Zeile in der Karte
+    const ck = !x.end && crossInto(e), openP = ck ? papersFor(ck).filter((p) => p.kind === "einreise" && paperOpen(p)).length : 0;
+    const steps = x.end || x.later ? [] : dwSteps(e);
+    return `<div class="dw-it snap ${past ? "past" : ""} ${tent ? "tent" : ""}" data-dwi="${i}" data-dwid="${esc(e.id)}"><span class="dw-t">${t}</span><span class="dw-dot"></span><button type="button" class="dw-card"><span class="dw-k">${esc(k)}</span><b>${esc(titleOf(e))}</b><span class="dw-s">${esc(subOf(e))}${openP ? ` · <span class="dw-warn">Einreise: ${openP} offen</span>` : ""}</span>${cd}</button></div>`
+      + steps.map((s) => `<div class="dw-step ${tent ? "tent" : ""} ${s.done ? "done" : ""} ${past ? "past" : ""}"><span class="dw-t"></span><span class="dw-sd"></span><button type="button" class="dw-sn" data-dwstep="${esc(e.id)}">${esc(s.name)}</button></div>`).join("");
   }).join("");
   S.dwFocus = S.dwPick && S.dwPick.day === td && Date.now() - S.dwPick.at < 10 * 60000 && (S.dwPick.id === "gap" ? !!freeNow : items.some((x) => x.e && x.e.id === S.dwPick.id)) ? S.dwPick.id : focus;
-  const n = items.filter((x) => x.k !== "now").length, hgt = n <= 1 ? 160 : n === 2 ? 300 : 400;   // wenig los: weniger Platz
+  // der Tag steht im Vordergrund: Platz nach Inhalt, bis gut die halbe Bildschirmhöhe; wenig los: weniger Platz
+  const n = items.filter((x) => x.k !== "now").length, ns = (html.match(/class="dw-step/g) || []).length;
+  const hgt = n <= 1 && !ns ? 160 : Math.min(n * 132 + ns * 30 + 40, Math.max(400, Math.round((innerHeight || 800) * 0.62)));
   return `<div><div class="dw" aria-label="Der Tag" style="height:${hgt}px"><div class="dw-wheel" id="dw-wheel"><div class="dw-pad"></div>${html}<div class="dw-pad"></div></div><div class="dw-fade t"></div><div class="dw-fade b"></div></div><div class="actions dw-acts" id="dw-acts"></div></div>`;
+}
+// Ablauf eines Tagesplans (Schritte mit Bezug zum Termin, ohne Essen/Ausgehen/Alternativen), Kurzname
+function dwSteps(e) {
+  const list = S.tips.filter((t) => t.event === e.id && !t.alt && !["essen", "ausgehen"].includes(t.cat)).sort(tipOrder);
+  const name = (t) => { const x = String(t.title || t.text || ""), i = x.indexOf(": "); return i > 0 && i <= 48 ? x.slice(0, i) : x.length > 46 ? x.slice(0, 44) + " …" : x; };
+  const out = list.slice(0, 6).map((t) => ({ name: name(t), done: !!t.done }));
+  if (list.length > 6) out.push({ name: `und ${list.length - 6} weitere`, done: false });
+  return out;
 }
 function dayActsHtml(x) {
   if (!x) return "";
@@ -4587,6 +4650,7 @@ function bindDayWheel() {
     const r = w.getBoundingClientRect(), mid = r.top + r.height / 2;
     let best = null, bd = 1e9;
     w.querySelectorAll(".dw-it").forEach((it) => { const b = it.getBoundingClientRect(), c = b.top + b.height / 2, d = Math.abs(c - mid); it.style.opacity = String(Math.max(0.45, 1 - 0.5 * Math.min(1, d / (r.height / 2)))); if (d < bd) { bd = d; best = it; } });
+    w.querySelectorAll(".dw-step").forEach((it) => { const b = it.getBoundingClientRect(), d = Math.abs(b.top + b.height / 2 - mid); it.style.opacity = String(Math.max(0.45, 1 - 0.5 * Math.min(1, d / (r.height / 2)))); });
     w.querySelectorAll(".dw-it").forEach((it) => it.classList.toggle("center", it === best));
     if (best) setActs(items[+best.dataset.dwi]);
   };
@@ -4598,6 +4662,7 @@ function bindDayWheel() {
     upd();
     if (user) { const c = w.querySelector(".dw-it.center[data-dwid]"); if (c) S.dwPick = { id: c.dataset.dwid, day: today(), at: Date.now() }; }   // eigene Wahl bleibt 10 Min.
   }), { passive: true });
+  w.querySelectorAll("[data-dwstep]").forEach((b) => b.addEventListener("click", () => openDetail(b.dataset.dwstep)));
   w.querySelectorAll(".dw-it").forEach((it) => it.querySelector("button").addEventListener("click", () => {
     const x = items[+it.dataset.dwi];
     if (!it.classList.contains("center")) { user = true; goTo(it, true); return; }
@@ -4941,6 +5006,27 @@ function paperCrossing() {
     if ((n === 0 && (!e.end || e.end > Date.now())) || n === 1) return { key: k, day: d, e };
   }
   return null;
+}
+// Grenzübertritt heute (Abflug oder Ankunft heute) mit dem Zeitpunkt der Ankunft
+function crossToday() {
+  const td = today();
+  for (const e of sortedEvents()) {
+    const k = crossInto(e); if (!k || e.tentative) continue;
+    const arr = e.end || e.start + 3 * 3600000;
+    if (localDateIn(e.start, deviceTz()) === td || localDateIn(arr, deviceTz()) === td) return { key: k, e, arr };
+  }
+  return null;
+}
+// das Land, in dem man gerade ist: am Reisetag bis zur Ankunft noch das alte
+function hereNow() {
+  const c = crossToday();
+  if (c) return Date.now() < c.arr ? (phaseByKey(c.e.fromCountry) || phaseOn(today())) : phaseByKey(c.key);
+  return phaseOn(today());
+}
+// Einreise auf „Heute“: erst ab 1 Std. vor der Ankunft bis 3 Std. danach (sonst über die Fahrt im Tagesfaden)
+function entryNow() {
+  const c = crossToday(), now = Date.now();
+  return c && now >= c.arr - 3600000 && now <= c.arr + 3 * 3600000 ? c : null;
 }
 // knappe Liste für „Heute“ und den Termin: Name, Status, Zeigen
 function paperMiniList(list) {
@@ -5993,7 +6079,9 @@ function syncBoot() {
     else if (SY.dirty) { clearTimeout(SY.timer); syncNow("leave"); }
   });
 }
-const APP_VERSION = "57";
+const APP_VERSION = "59";
+// angezeigt als 1.x: Build 1 = 1.0, 2 = 1.1, 3 = 1.2 … (der Cache zählt weiter mit der Build-Nummer)
+function appVersionShown() { return "1." + Math.max(0, +APP_VERSION - 1); }
 /* ---------- Render & boot ---------- */
 function render() {
   _sorted = null; _conf = null; _pres = null; _flags.clear();
