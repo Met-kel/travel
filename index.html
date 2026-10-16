@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="referrer" content="no-referrer">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' blob: data: https://*.workers.dev https://api.open-meteo.com https://cdn.jsdelivr.net https://*.currency-api.pages.dev https://api.frankfurter.dev; object-src 'none'; base-uri 'self'; form-action 'none'">
-<link rel="manifest" href="manifest.webmanifest?v=61">
+<link rel="manifest" href="manifest.webmanifest?v=62">
 <link rel="icon" href="koffer-192.png">
 <link rel="apple-touch-icon" href="koffer-180.png">
 <title>Reise</title>
@@ -657,6 +657,15 @@ details.tips[open] summary span:last-child { transform: rotate(45deg); }
 
 /* Forms */
 .types { display: flex; flex-wrap: wrap; gap: 6px; }
+/* Kasse: eine Zahlung aufteilen */
+.ksplitbox { display: grid; gap: 10px; margin-top: 4px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.ksprow { display: grid; grid-template-columns: minmax(0, 1fr) 7.5em auto; align-items: center; gap: 10px; }
+.ksprow label { font-size: 14px; color: var(--ink); overflow-wrap: anywhere; }
+.ksprow input { width: 100%; min-width: 0; border: 0; border-bottom: 1px solid var(--line-strong); background: transparent; padding: 8px 0; border-radius: 0; font: inherit; font-size: 16px; color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; }
+.ksprow input:focus { outline: none; border-bottom-color: var(--ink); }
+.kspcur { font-size: 13px; color: var(--muted); min-width: 2.6em; }
+.ksprest { margin: 0; font-size: 13.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ksprest.bad { color: var(--wood); }
 .types label { cursor: pointer; }
 .types input { position: absolute; opacity: 0; pointer-events: none; }
 .types span { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line-strong); border-radius: 999px; padding: 6px 12px; font-size: 13px; }
@@ -1360,7 +1369,7 @@ function renderHeute() {
     const xs = S.expenses.filter((x) => !kIsSettle(x) && x.date === td);
     let sum = 0, est = false; for (const x of xs) { const a = kAcct(S.kasse, x); if (a.v != null) { sum += a.v; if (a.est) est = true; } }
     const avg = kDayAvg(S.kasse);
-    moneyHtml = `<div class="hmrow"><button class="tilebtn" type="button" id="hp-kasse"><span class="tt"><span>Heute ausgegeben</span><small>${xs.length ? `${est ? "≈ " : ""}${kfmt(kr2(sum), S.kasse.accountCur)}` : "noch nichts"}${avg && (avg.sum || xs.length) ? ` · Ø pro Tag ${kAvgTxt(avg, S.kasse.accountCur)}` : ""}</small></span></button>${canEdit() ? `<button class="hmplus" type="button" id="hpay" aria-label="Zahlung eintragen">${ui("plus")}</button>` : ""}</div>`;
+    moneyHtml = `<div class="hmrow"><button class="tilebtn" type="button" id="hp-kasse"><span class="tt"><span>Heute ausgegeben</span><small>${xs.length ? `${est ? "≈ " : ""}${kfmt(kr2(sum), S.kasse.accountCur)}` : "noch nichts"}${avg && (avg.sum || xs.length) ? ` · Ø ${solo() ? "" : "gemeinsam "}${kAvgTxt(avg, S.kasse.accountCur)} pro Tag` : ""}</small></span></button>${canEdit() ? `<button class="hmplus" type="button" id="hpay" aria-label="Zahlung eintragen">${ui("plus")}</button>` : ""}</div>`;
   }
   // before departure: three things to check
   let prepHtml = "";
@@ -1402,7 +1411,7 @@ function renderHeute() {
   bindTop();
   bindRows(s);
   const hp = $("hpay"); if (hp) hp.addEventListener("click", () => kExpenseSheet(null));
-  $("hp-kasse")?.addEventListener("click", () => setTab("kasse"));
+  $("hp-kasse")?.addEventListener("click", () => { if (kDayAvg(S.kasse)) kAvgSheet(); else setTab("kasse"); });
   const h1 = $("hp-pack"); if (h1) h1.addEventListener("click", () => setTab("packen"));
   $("hp-ideas")?.addEventListener("click", () => openIdeas(idPlace));
   $("hp-papers")?.addEventListener("click", () => openPapers(hereKey));
@@ -6093,7 +6102,7 @@ function syncBoot() {
     else if (SY.dirty) { clearTimeout(SY.timer); syncNow("leave"); }
   });
 }
-const APP_VERSION = "61";
+const APP_VERSION = "62";
 // angezeigt als 1.x: Build 1 = 1.0, 2 = 1.1, 3 = 1.2 … (der Cache zählt weiter mit der Build-Nummer)
 function appVersionShown() { return "1." + Math.max(0, +APP_VERSION - 1); }
 /* ---------- Render & boot ---------- */
@@ -6137,7 +6146,30 @@ const kParse = (v) => { v = String(v ?? "").trim().replace(/['’\s]/g, ""); if 
 const kShort = (d) => { try { const f = fmtDay(d); return `${f.d}. ${f.mo}`; } catch { return d || ""; } };
 const kDay = (d) => { try { return fmtShort(d); } catch { return d || ""; } };
 const kIsSettle = (x) => x.type === "settle";
-const kName = (k) => { const tr = travelers(); return k === "A" ? tr[0] : k === "B" ? tr[1] : "Gemeinsam"; };   // Kasse rechnet zwischen den ersten zwei Personen
+const kName = (k) => { const tr = travelers(); return k === "A" ? tr[0] : k === "B" ? tr[1] : k === "split" ? "Aufgeteilt" : "Gemeinsam"; };   // Kasse rechnet zwischen den ersten zwei Personen
+// Wer trägt welchen Teil einer Zahlung, als Anteile 0…1: nur A, nur B, gemeinsam.
+// „Aufgeteilt“ (who "split"): eine Zahlung, davon Beträge nur für A bzw. B (split.A, split.B, in der Zahlungswährung), der Rest ist gemeinsam.
+// Die Bankbuchung gilt für die ganze Zahlung; die Teile werden im selben Verhältnis umgerechnet.
+function kSplitOf(x) {
+  const w = x.who || "shared";
+  if (w === "A") return { a: 1, b: 0, s: 0 };
+  if (w === "B") return { a: 0, b: 1, s: 0 };
+  if (w === "split" && x.split && x.amount > 0) {
+    const a = Math.max(0, Math.min(1, (+x.split.A || 0) / x.amount)), b = Math.max(0, Math.min(1 - a, (+x.split.B || 0) / x.amount));
+    return { a, b, s: Math.max(0, 1 - a - b) };
+  }
+  return { a: 0, b: 0, s: 1 };
+}
+const kPart = (x, k) => { const f = kSplitOf(x); return k === "A" ? f.a : k === "B" ? f.b : f.s; };
+function kWhoText(x, long) {
+  const w = x.who || "shared"; if (w !== "split") return kName(w);
+  if (!long) return "Aufgeteilt";
+  const sp = x.split || {}, parts = [];
+  if (+sp.A) parts.push(`${kName("A")} ${kfmt(+sp.A, x.cur)}`);
+  if (+sp.B) parts.push(`${kName("B")} ${kfmt(+sp.B, x.cur)}`);
+  const rest = kr2((x.amount || 0) - (+sp.A || 0) - (+sp.B || 0)); if (rest > 0.004) parts.push(`gemeinsam ${kfmt(rest, x.cur)}`);
+  return "Aufgeteilt: " + parts.join(", ");
+}
 const kOpenItems = (t) => S.expenses.filter((x) => !kIsSettle(x) && x.booked == null && x.cur !== t.accountCur);
 const KS = { view: "ov", F: { who: "all", open: false, country: "" }, drafts: {}, details: false };
 
@@ -6211,7 +6243,8 @@ function kTotals(t) {
     const a = kAcct(t, x); if (a.v == null) { unknown++; continue; }
     if (a.est) estSum += a.v;
     tot += a.v;
-    if (x.who === "A") A += a.v; else if (x.who === "B") B += a.v; else { sh += a.v; A += a.v * pA; B += a.v * (1 - pA); }
+    const f = kSplitOf(x);
+    sh += a.v * f.s; A += a.v * (f.a + f.s * pA); B += a.v * (f.b + f.s * (1 - pA));
   }
   let owed = null, openA = null, openB = null;
   if (t.owner === "A") owed = B - payB + payA;
@@ -6230,13 +6263,15 @@ function kSince(ms) {
 }
 
 /* ---------- Kasse screen ---------- */
-function kPayRow(t, x, withDate, hideWho) {
+function kPayRow(t, x, withDate, hideWho, part) {
   const C = t.accountCur;
   if (kIsSettle(x)) return `<li><button class="krow pay settle" type="button" data-kopen="${esc(x.id)}">
       <span class="ti">${esc(kSettleLabel(t, x))}</span><span class="amt">${kfmt(x.amount, C)}</span>
       <span class="su">${withDate ? esc(kShort(x.date)) + " · " : ""}${t.owner === "joint" ? "Einzahlung" : "Ausgleich"}${x.desc ? " · " + esc(x.desc) : ""}</span><span class="orig"></span></button></li>`;
-  const a = kAcct(t, x), who = x.who || "shared", foreign = x.cur !== C;
-  const meta = [withDate ? kShort(x.date) : "", hideWho ? "" : kName(who)].filter(Boolean).map(esc).join(" · ");
+  const a = kAcct(t, x), foreign = x.cur !== C;
+  // aufgeteilt: in der Liste einer Person bzw. „Gemeinsam“ steht der Anteil dazu
+  const pv = part && x.who === "split" && a.v != null ? kr2(a.v * kPart(x, part)) : null;
+  const meta = [withDate ? kShort(x.date) : "", hideWho && x.who !== "split" ? "" : kWhoText(x), pv != null ? `Anteil ${a.est ? "≈ " : ""}${kfmt(pv, C)}` : ""].filter(Boolean).map(esc).join(" · ");
   return `<li><button class="krow pay" type="button" data-kopen="${esc(x.id)}">
     <span class="ti">${esc(x.desc || "Ohne Beschreibung")}</span>
     <span class="amt ${a.est ? "est" : ""}">${a.v == null ? "Kurs fehlt" : (a.est ? "≈ " : "") + kfmt(a.v, C)}</span>
@@ -6296,18 +6331,19 @@ function kOverviewHtml(t) {
       <ul class="legs" style="margin-bottom:16px">
         <li><span>Gesamtausgaben</span><span>${T.estSum ? "≈ " : ""}${kfmt(kr2(T.tot), C)}</span></li>
         ${T.estSum ? `<li><span>davon geschätzt</span><span>≈ ${kfmt(kr2(T.estSum), C)}</span></li>` : ""}
-        ${(() => { const r = kDayAvg(t); return r ? `<li><span>Durchschnitt pro Tag <span class="muted">· ${r.days} ${r.days === 1 ? "Reisetag" : "Reisetage"}</span></span><span>${kAvgTxt(r, C)}</span></li>` : ""; })()}
+        ${(() => { const r = kDayAvg(t); return r ? `<li><button class="linkbtn" style="padding:0" type="button" data-kact="avg">Durchschnitt pro Tag${solo() ? "" : " (gemeinsam)"}</button><span>${kAvgTxt(r, C)}</span></li>` : ""; })()}
         ${T.unknown ? `<li><span>ohne bekannten Kurs</span><span>${T.unknown} Zahlung${T.unknown === 1 ? "" : "en"}</span></li>` : ""}
       </ul>
       ${byCat.length ? `<p class="label">Nach Kategorie</p><ul class="legs" style="margin-bottom:16px">${byCat.map(([l, v, e]) => `<li><span>${l}</span><span>${e ? "≈ " : ""}${kfmt(kr2(v), C)}</span></li>`).join("")}</ul>` : ""}
       ${countries.length ? `<p class="label">Nach Land</p>` : ""}<ul class="legs" style="margin-bottom:16px">
-        ${countries.map(([k, e]) => { const r = kDayAvg(t, k); return `<li><button class="linkbtn" style="padding:0" type="button" data-kcountry="${esc(k)}">${esc(k)}</button><span>${e.est ? "≈ " : ""}${kfmt(kr2(e.sum), C)}${r ? `<span class="kavg">Ø ${kAvgTxt(r, C)} pro Tag</span>` : ""}</span></li>`; }).join("")}
+        ${countries.map(([k, e]) => { const r = kDayAvg(t, k); return `<li><button class="linkbtn" style="padding:0" type="button" data-kcountry="${esc(k)}">${esc(k)}</button><span>${e.est ? "≈ " : ""}${kfmt(kr2(e.sum), C)}${r ? `<span class="kavg">Ø ${solo() ? "" : "gemeinsam "}${kAvgTxt(r, C)} pro Tag</span>` : ""}</span></li>`; }).join("")}
         ${noCountry && countries.length ? `<li><button class="linkbtn" style="padding:0" type="button" data-kcountry="-">Ohne Land</button><span>${noCountry.est ? "≈ " : ""}${kfmt(kr2(noCountry.sum), C)}</span></li>` : ""}
       </ul></details>` : ""}
   </div>`;
 }
 // Tagesschnitt: nur Zahlungen mit Datum innerhalb der Reise (bis heute), geteilt durch alle Reisetage bis heute,
-// auch Tage ohne Ausgaben. Für beide zusammen, wie „Heute ausgegeben“. Optional nur ein Land (Name wie in der Zahlung).
+// auch Tage ohne Ausgaben. Nur das Gemeinsame (ab 1.61): was eine Person allein trägt, würde den Schnitt verzerren und steht
+// in der Aufschlüsselung (kAvgSheet) separat. Aufgeteilte Zahlungen zählen mit ihrem gemeinsamen Teil. Optional nur ein Land.
 function kDayAvg(t, country) {
   const td = today(); if (!t || !S.trip || !S.trip.start || td < S.trip.start) return null;
   let a = S.trip.start, b = S.trip.end && S.trip.end < td ? S.trip.end : td;
@@ -6323,17 +6359,63 @@ function kDayAvg(t, country) {
   for (const x of S.expenses) {
     if (kIsSettle(x) || !x.date || x.date < a || x.date > b) continue;
     if (country && norm(x.country || "") !== norm(country)) continue;
+    const sp = kPart(x, "s"); if (!sp) continue;
     const v = kAcct(t, x); if (v.v == null) continue;
-    sum += v.v; if (v.est) est = true;
+    sum += v.v * sp; if (v.est) est = true;
   }
   return { avg: sum / days, days, sum, est };
 }
 const kAvgTxt = (r, C) => `${r.est ? "≈ " : ""}${esc(C)} ${kNum(Math.round(r.avg), 0)}`;
+// Aufschlüsselung des Tagesschnitts: was zählt (Zeitraum, Tage), wofür (Kategorie pro Tag, ohne Unterkunft), für wen, die letzten Tage, was nicht zählt
+function kAvgSheet() {
+  const t = S.kasse; if (!t) return;
+  const C = t.accountCur, r = kDayAvg(t); if (!r) { toast("Den Durchschnitt gibt es ab dem ersten Reisetag."); return; }
+  const td = today(), a = S.trip.start, b = S.trip.end && S.trip.end < td ? S.trip.end : td, pA = (t.shareA ?? 50) / 100;
+  const cat = {}, day = {}, own = { A: 0, B: 0, s: 0 }; let n = 0, est = false, estI = false, before = 0, beforeN = 0, beforeEst = false, unknown = 0;
+  for (const x of S.expenses) {
+    if (kIsSettle(x) || !x.date) continue;
+    const v = kAcct(t, x);
+    if (x.date < a) { if (v.v != null) { before += v.v; beforeN++; if (v.est) beforeEst = true; } continue; }
+    if (x.date > b) continue;
+    if (v.v == null) { unknown++; continue; }
+    const f = kSplitOf(x);
+    own.A += v.v * f.a; own.B += v.v * f.b; own.s += v.v * f.s;   // gemeinsam vs. individuell (aufgeteilte Zahlungen anteilig)
+    if (f.a || f.b) { if (v.est) estI = true; }
+    if (!f.s) continue;   // nur Gemeinsames zählt im Schnitt
+    n++; if (v.est) est = true;
+    const c = kCatOf(x); cat[c] = (cat[c] || 0) + v.v * f.s;
+    day[x.date] = (day[x.date] || 0) + v.v * f.s;
+  }
+  const ap = est ? "≈ " : "", iap = estI ? "≈ " : "", pd = (v) => kfmt(kr2(v / r.days), C);
+  const noHotel = r.sum - (cat.unterkunft || 0);
+  const catRows = KCATS.filter(([k]) => cat[k]).sort((x, y) => cat[y[0]] - cat[x[0]]).map(([k, l]) => `<li><span>${esc(l)} <span class="muted">· ${ap}${kfmt(kr2(cat[k]), C)}</span></span><span>${ap}${pd(cat[k])}</span></li>`).join("");
+  const days = []; for (let i = 0; i < 7; i++) { const d = dateOfDayNumber(dayNumber(b) - i); if (d < a) break; days.push(d); }
+  const two = !solo();
+  kOpenInfo(`${kTop("", "Zurück")}
+    <div><div class="dt-kind">Kasse</div><h1 class="dt-title">Durchschnitt pro Tag</h1></div>
+    <span class="kbig"><small>${esc(C)}</small>${ap}${kNum(Math.round(r.avg), 0)}</span>
+    <p class="note" style="margin:-8px 0 0">${two ? "Gemeinsame Ausgaben: " : ""}${n} Zahlung${n === 1 ? "" : "en"} vom ${esc(fmtShort(a))} bis ${td <= b ? "heute" : esc(fmtShort(b))}, zusammen ${ap}${kfmt(kr2(r.sum), C)}, geteilt durch <b>${r.days} ${r.days === 1 ? "Reisetag" : "Reisetage"}</b>${td <= b ? " (heute mitgezählt)" : ""}. Tage ohne Ausgaben zählen mit.${two ? " Was nur eine Person betrifft, zählt nicht dazu, damit es den Schnitt nicht verzerrt; es steht weiter unten." : ""}</p>
+    ${catRows ? `<div><p class="label">Pro Tag nach Kategorie</p><ul class="legs">${catRows}</ul>
+      ${cat.unterkunft && noHotel > 0 ? `<ul class="legs" style="border-top:0"><li style="font-weight:500"><span>Ohne Unterkunft</span><span style="color:var(--ink)">${ap}${pd(noHotel)}</span></li></ul>` : ""}</div>` : ""}
+    ${two ? `<div><p class="label">Individuell, nicht im Schnitt</p><ul class="legs">
+        <li><span>Nur ${esc(kName("A"))} <span class="muted">· ${iap}${kfmt(kr2(own.A), C)}</span></span><span>${own.A ? `${iap}${pd(own.A)} / Tag` : "–"}</span></li>
+        <li><span>Nur ${esc(kName("B"))} <span class="muted">· ${iap}${kfmt(kr2(own.B), C)}</span></span><span>${own.B ? `${iap}${pd(own.B)} / Tag` : "–"}</span></li></ul>
+      <p class="note" style="margin:6px 0 0">Vom Gemeinsamen trägt ${esc(kName("A"))} ${Math.round(pA * 100)} % (${ap}${pd(own.s * pA)} pro Tag), ${esc(kName("B"))} ${Math.round((1 - pA) * 100)} % (${ap}${pd(own.s * (1 - pA))}).</p></div>` : ""}
+    <div><p class="label">Die letzten Tage</p><ul class="legs">${days.map((d) => { const f = fmtDay(d); return `<li><span>${d === td ? "Heute" : `${esc(f.wd)} ${f.d}. ${esc(f.mo)}`}</span><span>${day[d] ? ap + kfmt(kr2(day[d]), C) : `<span class="muted">nichts</span>`}</span></li>`; }).join("")}</ul></div>
+    <div><p class="label">Nicht mitgezählt</p><ul class="legs">
+      <li><span>Vor der Reise bezahlt <span class="muted">· ${beforeN} Zahlung${beforeN === 1 ? "" : "en"}</span></span><span>${beforeN ? (beforeEst ? "≈ " : "") + kfmt(kr2(before), C) : "–"}</span></li>
+      ${unknown ? `<li><span>Ohne bekannten Kurs</span><span>${unknown} Zahlung${unknown === 1 ? "" : "en"}</span></li>` : ""}
+      <li><span>${t.owner === "joint" ? "Einzahlungen aufs Konto" : "Ausgleiche zwischen euch"}</span><span class="muted">zählen nie</span></li>
+    </ul>${beforeN ? `<p class="note" style="margin:6px 0 0">Was vor der Abreise bezahlt wurde (z. B. Flüge, Hotels), steht unter Gesamtausgaben, aber nicht im Tagesschnitt.</p>` : ""}</div>
+    <div class="actions"><button class="btn" type="button" id="ka-list">Zahlungen ansehen</button></div>`, (root) => {
+    root.querySelector("#ka-list")?.addEventListener("click", () => { hideSheet("kinfo"); KS.view = "list"; KS.F = { who: "all", open: false, country: "" }; setTab("kasse"); });
+  });
+}
 function kFiltered() {
   const F = KS.F;
   let xs = S.expenses.slice().sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.createdAt || "").localeCompare(a.createdAt || ""));
   if (F.who === "settle") xs = xs.filter(kIsSettle);
-  else if (F.who !== "all") xs = xs.filter((x) => !kIsSettle(x) && (x.who || "shared") === F.who);
+  else if (F.who !== "all") xs = xs.filter((x) => !kIsSettle(x) && kPart(x, F.who === "shared" ? "s" : F.who) > 0);   // aufgeteilte Zahlungen stehen bei jedem, der einen Teil trägt
   if (F.open) xs = xs.filter((x) => !kIsSettle(x) && x.booked == null);
   if (F.country) xs = xs.filter((x) => !kIsSettle(x) && (F.country === "-" ? !x.country : x.country === F.country));
   return xs;
@@ -6428,7 +6510,7 @@ function kBookHtml(t) {
   <ul class="rows">${xs.map((x) => { const a = kAcct(t, x);
     return `<li class="kbk">
       <div class="kbk-top"><span class="ti">${esc(x.desc || "Ohne Beschreibung")}</span><span class="amt">${kfmt(x.amount, x.cur)}</span></div>
-      <div class="su">${esc(kDay(x.date))} · ${esc(kName(x.who || "shared"))}${a.v != null ? ` · geschätzt ≈ ${kfmt(a.v, C)}` : ""}</div>
+      <div class="su">${esc(kDay(x.date))} · ${esc(kWhoText(x))}${a.v != null ? ` · geschätzt ≈ ${kfmt(a.v, C)}` : ""}</div>
       <form class="kbk-in" data-kbook="${esc(x.id)}" novalidate>
         <input id="kbk-${esc(x.id)}" inputmode="decimal" enterkeyhint="next" autocomplete="off" placeholder="${a.v != null ? kNum(a.v) : "Betrag " + esc(C)}" aria-label="Verbuchter Betrag in ${esc(C)}">
         <button class="btn solid" type="submit">Übernehmen</button>
@@ -6475,7 +6557,13 @@ function kExpenseSheet(x) {
     <div class="kst" data-kstep="2"><div class="field"><span class="lb">Kategorie</span><div class="types" role="radiogroup">${KCATS.map(([k, l]) => kPill("kx-cat", k, l, (isNew ? pref("klastcat", "essen") : kCatOf(x)) === k)).join("")}</div></div>
       <div class="field"><label for="kx-desc">Wofür</label><input id="kx-desc" value="${esc(x.desc)}" placeholder="z. B. Abendessen" autocomplete="off" enterkeyhint="next"></div>
       <div id="kx-sugg"></div></div>
-    <div class="kst" data-kstep="3"><div class="field"><span class="lb">Wer trägt die Kosten</span><div class="types" role="radiogroup">${kPill("kx-who", "shared", "Gemeinsam", (x.who || "shared") === "shared")}${kPill("kx-who", "A", kName("A"), x.who === "A")}${kPill("kx-who", "B", kName("B"), x.who === "B")}</div></div>
+    <div class="kst" data-kstep="3"><div class="field"><span class="lb">Wer trägt die Kosten</span><div class="types" role="radiogroup">${kPill("kx-who", "shared", "Gemeinsam", (x.who || "shared") === "shared")}${kPill("kx-who", "A", kName("A"), x.who === "A")}${kPill("kx-who", "B", kName("B"), x.who === "B")}${kPill("kx-who", "split", "Aufteilen", x.who === "split")}</div></div>
+    <div class="ksplitbox" id="kx-splitbox" ${x.who === "split" ? "" : "hidden"}>
+      <p class="note" style="margin:0">Eine Zahlung, aber nicht alles ist gemeinsam: trag ein, was davon nur eine Person betrifft. Der Rest ist gemeinsam.</p>
+      <div class="ksprow"><label for="kx-spA">Nur ${esc(kName("A"))}</label><input id="kx-spA" inputmode="decimal" autocomplete="off" placeholder="0" value="${x.split && +x.split.A ? x.split.A : ""}"><span class="kspcur"></span></div>
+      <div class="ksprow"><label for="kx-spB">Nur ${esc(kName("B"))}</label><input id="kx-spB" inputmode="decimal" autocomplete="off" placeholder="0" value="${x.split && +x.split.B ? x.split.B : ""}"><span class="kspcur"></span></div>
+      <p class="ksprest" id="kx-sprest"></p>
+    </div>
     <div class="fgrid">
       <div class="field"><label for="kx-date">Datum</label><input id="kx-date" type="date" value="${esc(x.date)}"></div>
       <div class="field"><label for="kx-place">Ort</label><input id="kx-place" list="kplaces" value="${esc(x.place || kAutoPlace(x.date))}" autocomplete="off"><span class="hint" id="kx-placehint"></span></div>
@@ -6535,6 +6623,27 @@ function kExpenseSheet(x) {
       }
       if (W) next();
     });
+    // Aufteilen: Beträge nur für A / nur für B, der Rest gemeinsam (live angezeigt)
+    const spBox = q("#kx-splitbox");
+    const spRead = () => {
+      const amt = kParse(q("#kx-amt").value), cur = q("#kx-cur").value.trim().toUpperCase() || C;
+      const A = kParse(q("#kx-spA").value), B = kParse(q("#kx-spB").value);
+      const a = A == null || isNaN(A) ? 0 : A, b = B == null || isNaN(B) ? 0 : B;
+      return { amt, cur, a, b, bad: (A != null && isNaN(A)) || (B != null && isNaN(B)) || a < 0 || b < 0, rest: amt == null || isNaN(amt) ? null : kr2(amt - a - b) };
+    };
+    const spUpd = () => {
+      const on = (root.querySelector('input[name="kx-who"]:checked') || {}).value === "split";
+      spBox.hidden = !on; if (!on) return;
+      const r = spRead();
+      root.querySelectorAll(".kspcur").forEach((n) => { n.textContent = r.cur; });
+      const el = q("#kx-sprest");
+      if (r.bad) { el.textContent = "Bitte nur Zahlen eintragen."; el.classList.add("bad"); return; }
+      if (r.rest == null) { el.textContent = ""; return; }
+      el.classList.toggle("bad", r.rest < -0.004);
+      el.textContent = r.rest < -0.004 ? `Das ist ${kfmt(-r.rest, r.cur)} mehr als die ganze Zahlung (${kfmt(r.amt, r.cur)}).` : `Gemeinsam: ${kfmt(Math.max(0, r.rest), r.cur)} von ${kfmt(r.amt, r.cur)}`;
+    };
+    root.querySelectorAll('input[name="kx-who"]').forEach((r) => r.addEventListener("change", () => { spUpd(); if (!spBox.hidden && !q("#kx-spA").value && !q("#kx-spB").value) setTimeout(() => q("#kx-spA").focus(), 60); }));
+    ["#kx-spA", "#kx-spB", "#kx-amt", "#kx-cur"].forEach((s2) => q(s2).addEventListener("input", spUpd)); spUpd();
     showStep();
     const upd = () => {
       const cur = q("#kx-cur").value.trim().toUpperCase(), amt = kParse(q("#kx-amt").value), bk = kParse(q("#kx-booked").value);
@@ -6569,23 +6678,34 @@ function kExpenseSheet(x) {
       if (!/^[A-Z]{3}$/.test(cur)) return toast("Währung bitte als 3-Buchstaben-Code, z. B. EUR.");
       if (bk != null && isNaN(bk)) return toast("Der Betrag vom Kontoauszug ist keine Zahl.");
       if (cur === C) bk = amt;
-      const who = q('input[name="kx-who"]:checked').value;
+      let who = q('input[name="kx-who"]:checked').value, split = null;
+      if (who === "split") {
+        const r = spRead();
+        if (r.bad) return toast("Beim Aufteilen bitte nur Zahlen eintragen.");
+        if (amt < 0) return toast("Eine Rückzahlung lässt sich nicht aufteilen.");
+        if (r.rest < -0.004) return toast("Die Teile sind grösser als die ganze Zahlung.");
+        if (!r.a && !r.b) who = "shared";   // nichts eingetragen: alles gemeinsam
+        else if (Math.abs(r.a - amt) < 0.005) who = "A";
+        else if (Math.abs(r.b - amt) < 0.005) who = "B";
+        else split = { A: kr2(r.a), B: kr2(r.b) };
+      }
       const now = new Date().toISOString(), hist = (x.history || []).slice();
       const dateV = q("#kx-date").value || today(), pv = cIn.value.trim(), auto = kAutoPlace(dateV);
       const place = pv && norm(placeKey(pv)) !== norm(placeKey(auto)) ? pv : "";
       const country = kCountryFor(pv || auto, dateV, cur, C);
       const cat = q('input[name="kx-cat"]:checked').value;
       const prevEst = kAcct(t, x);
-      if (isNew) hist.push({ at: now, text: `Erfasst: ${kfmt(amt, cur)}, ${kName(who)}` });
+      const whoTxt = kWhoText({ who, split, amount: amt, cur }, true);
+      if (isNew) hist.push({ at: now, text: `Erfasst: ${kfmt(amt, cur)}, ${whoTxt}` });
       else {
         if (amt !== x.amount || cur !== x.cur) hist.push({ at: now, text: `Betrag geändert: ${kfmt(x.amount, x.cur)} → ${kfmt(amt, cur)}` });
-        if (who !== (x.who || "shared")) hist.push({ at: now, text: `Zuordnung: ${kName(x.who || "shared")} → ${kName(who)}` });
+        if (who !== (x.who || "shared") || JSON.stringify(split) !== JSON.stringify(x.split || null)) hist.push({ at: now, text: `Zuordnung: ${kWhoText(x, true)} → ${whoTxt}` });
         if (cat !== kCatOf(x)) hist.push({ at: now, text: `Kategorie: ${KCAT[kCatOf(x)]} → ${KCAT[cat]}` });
         if ((pv || auto) !== (x.place || kAutoPlace(x.date))) hist.push({ at: now, text: `Ort: ${x.place || kAutoPlace(x.date) || "–"} → ${pv || auto || "–"}` });
       }
       if (cur !== C && bk != null && bk !== x.booked) hist.push({ at: now, text: x.booked != null ? `Verbuchung korrigiert: ${kfmt(x.booked, C)} → ${kfmt(bk, C)}` : `Von der Bank verbucht: ${kfmt(bk, C)}${prevEst.v != null ? ` (geschätzt war ${kfmt(prevEst.v, C)})` : ""}` });
       if (bk == null && x.booked != null && cur !== C) hist.push({ at: now, text: "Verbuchung entfernt, wieder geschätzt" });
-      const out = { ...x, desc: q("#kx-desc").value.trim(), amount: amt, cur, who, cat, place, country, date: dateV,
+      const out = { ...x, desc: q("#kx-desc").value.trim(), amount: amt, cur, who, split, cat, place, country, date: dateV,
         booked: bk == null ? null : kr2(bk), bookedAt: bk == null ? null : (x.booked === bk ? x.bookedAt : now),
         createdAt: x.createdAt || now, updatedAt: now, history: hist.slice(-30) };
       delete out.id;
@@ -6682,7 +6802,7 @@ function kBalanceSheet() {
   const t = S.kasse, C = t.accountCur, T = kTotals(t), joint = t.owner === "joint";
   const debtor = joint ? null : (t.owner === "A" ? "B" : "A");
   const pD = debtor === "A" ? T.pA : 1 - T.pA;
-  const contrib = (x, v) => joint ? v : x.who === debtor ? v : (x.who || "shared") === "shared" ? v * pD : 0;
+  const contrib = (x, v) => { if (joint) return v; const f = kSplitOf(x); return v * ((debtor === "A" ? f.a : f.b) + f.s * pD); };
   const total = joint ? T.tot : T.owed;
   let estPart = 0, unknown = 0; const byCur = new Map(), pending = [];
   for (const x of S.expenses) {
@@ -6716,23 +6836,23 @@ function kBalanceSheet() {
 function kCategorySheet(k) {
   const t = S.kasse, C = t.accountCur, T = kTotals(t), joint = t.owner === "joint";
   const byDate = (a, b) => (b.date || "").localeCompare(a.date || "") || (b.createdAt || "").localeCompare(a.createdAt || "");
-  const sumOf = (xs) => { let s2 = 0, est = false; for (const x of xs) { const a = kAcct(t, x); if (a.v != null) { s2 += a.v; if (a.est) est = true; } } return { s: s2, est }; };
+  const sumOf = (xs, part) => { let s2 = 0, est = false; for (const x of xs) { const a = kAcct(t, x); if (a.v != null) { s2 += a.v * (part ? kPart(x, part) : 1); if (a.est) est = true; } } return { s: s2, est }; };
   const line = (label, val, opts = {}) => `<li${opts.strong ? ' style="font-weight:500"' : ""}><span>${label}</span><span${opts.strong ? ' style="color:var(--ink)"' : ""}>${opts.est ? "≈ " : ""}${val}</span></li>`;
-  const rows = (xs, hideWho) => `<ul class="rows">${xs.map((x) => kPayRow(t, x, true, hideWho)).join("")}</ul>`;
+  const rows = (xs, hideWho, part) => `<ul class="rows">${xs.map((x) => kPayRow(t, x, true, hideWho, part)).join("")}</ul>`;
   const none = (txt) => `<p class="note">${txt}</p>`;
   let title, dl, lists;
   if (k === "shared") {
-    const xs = S.expenses.filter((x) => !kIsSettle(x) && (x.who || "shared") === "shared").sort(byDate), Sm = sumOf(xs);
+    const xs = S.expenses.filter((x) => !kIsSettle(x) && kPart(x, "s") > 0).sort(byDate), Sm = sumOf(xs, "s");
     title = "Gemeinsam";
     dl = line("Gemeinsame Zahlungen", kfmt(kr2(Sm.s), C), { est: Sm.est, strong: true }) + line(`${esc(kName("A"))} / ${esc(kName("B"))} (${Math.round(T.pA * 100)} / ${Math.round((1 - T.pA) * 100)} %)`, `${kNum(kr2(Sm.s * T.pA))} / ${kNum(kr2(Sm.s * (1 - T.pA)))}`, { est: Sm.est });
-    lists = xs.length ? rows(xs, true) : none("Noch keine gemeinsamen Zahlungen.");
+    lists = xs.length ? rows(xs, true, "s") : none("Noch keine gemeinsamen Zahlungen.");
   } else {
     const other = k === "A" ? "B" : "A", p = k === "A" ? T.pA : 1 - T.pA;
-    const own = S.expenses.filter((x) => !kIsSettle(x) && x.who === k).sort(byDate), O = sumOf(own);
-    const shEst = sumOf(S.expenses.filter((x) => !kIsSettle(x) && (x.who || "shared") === "shared")).est;
+    const own = S.expenses.filter((x) => !kIsSettle(x) && kPart(x, k) > 0).sort(byDate), O = sumOf(own, k);
+    const shEst = sumOf(S.expenses.filter((x) => !kIsSettle(x) && kPart(x, "s") > 0)).est;
     const paid = S.expenses.filter((x) => kIsSettle(x) && x.from === k), got = joint ? [] : S.expenses.filter((x) => kIsSettle(x) && x.from === other);
     const sPaid = paid.reduce((s2, x) => s2 + x.amount, 0), sGot = got.reduce((s2, x) => s2 + x.amount, 0);
-    const share = (w) => { const f = w === "A" ? T.pA : 1 - T.pA; const o = sumOf(S.expenses.filter((x) => !kIsSettle(x) && x.who === w)); return { v: o.s + T.sh * f, est: o.est || shEst }; };
+    const share = (w) => { const f = w === "A" ? T.pA : 1 - T.pA; const o = sumOf(S.expenses.filter((x) => !kIsSettle(x) && kPart(x, w) > 0), w); return { v: o.s + T.sh * f, est: o.est || shEst }; };
     title = esc(kName(k));
     let openLabel, openVal, openEst;
     if (joint) { openLabel = "Noch offen"; openVal = kr2(k === "A" ? T.openA : T.openB); openEst = share(k).est; }
@@ -6755,7 +6875,7 @@ function kCategorySheet(k) {
     }
     if (!calc.startsWith("<p")) calc = `<ul class="legs">${calc}</ul>`;
     const settles = paid.concat(got).sort(byDate);
-    lists = (own.length ? `<div><p class="label">Eigene Zahlungen</p>${rows(own, true)}</div>` : none(`${esc(kName(k))} hat noch keine eigenen Zahlungen.`))
+    lists = (own.length ? `<div><p class="label">Eigene Zahlungen</p>${rows(own, true, k)}</div>` : none(`${esc(kName(k))} hat noch keine eigenen Zahlungen.`))
       + `<details class="tips"><summary><span>Berechnung${settles.length ? ` und ${joint ? "Einzahlungen" : "Ausgleiche"}` : ""}</span><span>+</span></summary><div style="display:grid;gap:14px;padding-bottom:16px">${calc}${settles.length ? rows(settles, false) : ""}</div></details>`;
   }
   kOpenInfo(`${kTop("", "Zurück")}
@@ -6790,7 +6910,7 @@ async function kExportCsv() {
   S.expenses.slice().sort((a, b) => (a.date || "").localeCompare(b.date || "")).forEach((x) => {
     if (kIsSettle(x)) { rows.push([x.date, x.desc, (t.owner === "joint" ? "Einzahlung " : "Ausgleich ") + kName(x.from) + (t.owner === "joint" ? "" : " → " + kName(x.from === "A" ? "B" : "A")), x.amount, x.cur, x.amount, "Ausgleich", "", "", ""]); return; }
     const a = kAcct(t, x);
-    rows.push([x.date, x.desc, kName(x.who || "shared"), x.amount, x.cur, a.v ?? "", x.cur === C ? "Kontowährung" : a.est ? "geschätzt" : "verbucht", a.v != null && x.amount ? (a.v / x.amount).toFixed(4) : "", x.bookedAt ? x.bookedAt.slice(0, 10) : "", x.country || ""]);
+    rows.push([x.date, x.desc, kWhoText(x, true), x.amount, x.cur, a.v ?? "", x.cur === C ? "Kontowährung" : a.est ? "geschätzt" : "verbucht", a.v != null && x.amount ? (a.v / x.amount).toFixed(4) : "", x.bookedAt ? x.bookedAt.slice(0, 10) : "", x.country || ""]);
   });
   try { await shareOrDownload(new Blob(["﻿" + rows.map((r) => r.map(qv).join(";")).join("\r\n")], { type: "text/csv" }), `${dayStamp()} Kasse.csv`); toast("CSV erstellt"); }
   catch (e) { if (!(e && e.code === "declined")) toast("Erstellen ging nicht."); }
@@ -6896,6 +7016,7 @@ $("s-kasse").addEventListener("click", (e) => {
   else if (act === "settings") kSettingsSheet(false);
   else if (act === "add") kExpenseSheet(null);
   else if (act === "settle") kSettleSheet(null);
+  else if (act === "avg") kAvgSheet();
   else if (act === "balance") { if (S.expenses.some((x) => !kIsSettle(x))) kBalanceSheet(); }
   else if (act === "backup") openSettings("trip", "sync");
   else if (act === "csv") kExportCsv();
