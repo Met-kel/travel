@@ -3633,9 +3633,9 @@ async function pwFailText(fileTag, pw, what, len) {
   if (fileTag && fileTag === mine) return `Das Passwort stimmt (Kennung <b class="pwtag">${mine}</b>), aber die ${what} ist beschädigt oder unvollständig.${len && len.want && len.n < len.want ? ` Es fehlen ${len.want - len.n} von ${len.want} Zeichen, die Nachricht ist abgeschnitten.` : len && len.want && len.n > len.want ? ` Es sind ${len.n - len.want} Zeichen zu viel darin, wohl hinten etwas mitkopiert.` : len && len.want ? " Die Länge stimmt, aber Zeichen wurden unterwegs verändert." : len ? ` Angekommen sind ${len.n} Zeichen Daten, das Ende lautet „…${esc(len.end)}“.` : ""} Bitte nochmals schicken${what === "Nachricht" ? " und die ganze Nachricht kopieren" : ""}.`;
   return `Das Passwort passt nicht zu dieser ${what}. Sie ist älter und zeigt ihre Kennung noch nicht. Am einfachsten: auf dem anderen Handy das Passwort mit dem Auge prüfen, neu sichern und nochmals schicken. Dann zeigt die App, ob die Kennung passt.`;
 }
-async function importMessageText(text) {
-  const status = $("st-importstatus") || document.createElement("p");
-  const pw = ($("st-pw") && $("st-pw").value) || pref("pw", "");
+async function importMessageText(text, o = {}) {
+  const status = o.status || $("st-importstatus") || document.createElement("p");
+  const pw = o.pw || ($("st-pw") && $("st-pw").value) || pref("pw", "");
   if (!pw) { status.textContent = "Trag oben das Passwort ein, dann nochmals einfügen."; return false; }
   const found = msgParts(text);
   if (found.length) {
@@ -6369,7 +6369,7 @@ function kOverviewHtml(t) {
   </button>
   ${T.n ? `<div class="summary ksum">${col("shared", T.sh)}${col("A", T.A)}${col("B", T.B)}</div>` : `<div class="empty"><span>Noch keine Zahlungen erfasst.</span></div>`}
   ${notes.length ? `<p class="callout">${notes.join("<br>")}</p>` : ""}
-  <div class="actions">${T.n ? `<button class="btn" type="button" data-kact="settle">${t.owner === "joint" ? "Einzahlung erfassen" : "Ausgleich erfassen"}</button>` : `<button class="btn solid" type="button" data-kact="add">Erste Zahlung erfassen</button>`}</div>
+  <div class="actions">${T.n ? `<button class="btn" type="button" data-kact="csv">${ui("ext")}Als Tabelle sichern</button><button class="btn" type="button" data-kact="settle">${t.owner === "joint" ? "Einzahlung erfassen" : "Ausgleich erfassen"}</button>` : `<button class="btn solid" type="button" data-kact="add">Erste Zahlung erfassen</button>`}</div>
   <div class="kmenu">
     ${T.n ? `<details class="tips" id="kdet" ${KS.details ? "open" : ""}><summary><span>Gesamt, Kategorien und Länder</span><span>+</span></summary>
       <ul class="legs" style="margin-bottom:16px">
@@ -6950,13 +6950,22 @@ async function kBookOne(id, input) {
 /* ---------- Kasse files: CSV and the old standalone app's backup ---------- */
 async function kExportCsv() {
   const t = S.kasse, C = t.accountCur, qv = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const rows = [["Datum", "Beschreibung", "Wer", "Betrag", "Währung", "Betrag " + C, "Status", "Kurs", "Verbucht am", "Land"]];
-  S.expenses.slice().sort((a, b) => (a.date || "").localeCompare(b.date || "")).forEach((x) => {
-    if (kIsSettle(x)) { rows.push([x.date, x.desc, (t.owner === "joint" ? "Einzahlung " : "Ausgleich ") + kName(x.from) + (t.owner === "joint" ? "" : " → " + kName(x.from === "A" ? "B" : "A")), x.amount, x.cur, x.amount, "Ausgleich", "", "", ""]); return; }
-    const a = kAcct(t, x);
-    rows.push([x.date, x.desc, kWhoText(x, true), x.amount, x.cur, a.v ?? "", x.cur === C ? "Kontowährung" : a.est ? "geschätzt" : "verbucht", a.v != null && x.amount ? (a.v / x.amount).toFixed(4) : "", x.bookedAt ? x.bookedAt.slice(0, 10) : "", x.country || ""]);
+  // Vollständige Tabelle, auch ohne App lesbar: jede Zahlung mit Anteilen pro Person, am Ende die Abrechnung
+  const pA = (t.shareA ?? 50) / 100, A = kName("A"), B = kName("B"), num = (v) => v == null || v === "" ? "" : String(kr2(v)).replace(".", ",");
+  const rows = [["Datum", "Beschreibung", "Kategorie", "Ort", "Land", "Wer", "Betrag", "Währung", "Betrag " + C, "Status", "Kurs", "Verbucht am", "Anteil " + A + " (" + C + ")", "Anteil " + B + " (" + C + ")", "davon gemeinsam (" + C + ")"]];
+  S.expenses.slice().sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.createdAt || "").localeCompare(b.createdAt || "")).forEach((x) => {
+    if (kIsSettle(x)) { rows.push([x.date, x.desc, "", "", "", (t.owner === "joint" ? "Einzahlung " : "Ausgleich ") + kName(x.from) + (t.owner === "joint" ? "" : " → " + kName(x.from === "A" ? "B" : "A")), num(x.amount), x.cur, num(x.amount), "Ausgleich", "", "", "", "", ""]); return; }
+    const a = kAcct(t, x), f = kSplitOf(x);
+    rows.push([x.date, x.desc, KCAT[kCatOf(x)] || "", x.place || kAutoPlace(x.date) || "", x.country || "", kWhoText(x, true), num(x.amount), x.cur, num(a.v), x.cur === C ? "Kontowährung" : a.est ? "geschätzt" : "verbucht", a.v != null && x.amount ? (a.v / x.amount).toFixed(4).replace(".", ",") : "", x.bookedAt ? x.bookedAt.slice(0, 10) : "",
+      a.v == null ? "" : num(a.v * (f.a + f.s * pA)), a.v == null ? "" : num(a.v * (f.b + f.s * (1 - pA))), a.v == null ? "" : num(a.v * f.s)]);
   });
-  try { await shareOrDownload(new Blob(["﻿" + rows.map((r) => r.map(qv).join(";")).join("\r\n")], { type: "text/csv" }), `${dayStamp()} Kasse.csv`); toast("CSV erstellt"); }
+  const T = kTotals(t);
+  rows.push([], ["Abrechnung", `Stand ${dayStamp()}`, "", "", "", "", "", "", "", T.estSum ? "teils geschätzt" : "", "", "", "", "", ""]);
+  rows.push(["", "Gesamtausgaben", "", "", "", "", "", "", num(T.tot), "", "", "", num(T.A), num(T.B), num(T.sh)]);
+  rows.push(["", `Verteilung ${A} / ${B}`, "", "", "", "", "", "", `${Math.round(pA * 100)} % / ${Math.round((1 - pA) * 100)} %`, "", "", "", "", "", ""]);
+  if (t.owner === "joint") rows.push(["", "Eingezahlt aufs Konto", "", "", "", "", "", "", "", "", "", "", num(T.payA), num(T.payB), ""], ["", "Noch offen", "", "", "", "", "", "", "", "", "", "", num(T.openA), num(T.openB), ""]);
+  else { const o = kr2(T.owed), other = t.owner === "A" ? "B" : "A"; rows.push(["", `Karte von ${kName(t.owner)}`, "", "", "", "", "", "", "", "", "", "", "", "", ""], ["", Math.abs(o) < 0.005 ? "Ihr seid quitt" : o > 0 ? `${kName(other)} schuldet ${kName(t.owner)}` : `${kName(t.owner)} schuldet ${kName(other)}`, "", "", "", "", "", "", num(Math.abs(o)), "", "", "", "", "", ""]); }
+  try { await shareOrDownload(new Blob(["\ufeff" + rows.map((r) => r.map(qv).join(";")).join("\r\n")], { type: "text/csv" }), `${dayStamp()} Kasse ${(S.trip && S.trip.title) || ""}.csv`.replace(/\s+\.csv$/, ".csv")); toast("Tabelle erstellt"); setPref("lastcsv-" + TRIP.id, String(Date.now())); }
   catch (e) { if (!(e && e.code === "declined")) toast("Erstellen ging nicht."); }
 }
 function kParseCSV(text) {
@@ -7225,13 +7234,48 @@ function renderTrips() {
   }));
   const c0 = center && w.querySelector(`[data-trip="${CSS.escape(center.id)}"]`);
   requestAnimationFrame(() => { if (c0) goTo(c0, false); upd(); });
-  $("tw-new").addEventListener("click", newTripSheet);
+  $("tw-new").addEventListener("click", newTripChooser);
   $("tw-set").addEventListener("click", () => openSettings("app"));
 }
 function packTemplate() { try { const a = JSON.parse(localStorage.getItem("ar-pack-template") || "[]"); return Array.isArray(a) ? a : []; } catch { return []; } }
 function savePackTemplate() {
   const items = S.packing.filter((p) => !p.mode || p.mode === "pack").map((p) => ({ cat: p.cat, name: p.name, qty: p.qty || 1, who: p.who || "each", daily: !!p.daily, mode: "pack", order: p.order ?? 0 }));
   try { localStorage.setItem("ar-pack-template", JSON.stringify(items)); toast(`Packliste gemerkt: ${items.length} Teile`); } catch { toast("Merken ging nicht."); }
+}
+// „+“ auf der Übersicht: selbst planen oder mit einer Einladung der anderen Person
+function newTripChooser() {
+  kOpenForm(`${kTop("")}
+    <div><p class="wstep">Neue Reise</p><h1 class="dt-title" style="margin:0">Wie fängt sie an?</h1></div>
+    <div class="kmenu">
+      <button class="morerow" type="button" id="nc-plan"><span>Selbst planen</span><span>${ui("chev")}</span></button>
+      <button class="morerow" type="button" id="nc-invite"><span>Mit einer Einladung<br><small class="muted" style="font-weight:400">Die andere Person hat die Reise schon angelegt und dir eine Einladung geschickt</small></span><span>${ui("chev")}</span></button>
+    </div>`, (root) => {
+    root.querySelector("#nc-plan").addEventListener("click", () => { kCloseForm(); newTripSheet(); });
+    root.querySelector("#nc-invite").addEventListener("click", () => { kCloseForm(); inviteSheet(); });
+  });
+}
+// Einladung einfügen: legt die Reise an und richtet den Abgleich ein (importMessageText)
+function inviteSheet() {
+  const pw0 = pref("pw", "");
+  kOpenForm(`${kTop("Einlesen")}
+    <div><p class="wstep">Neue Reise</p><h1 class="dt-title" style="margin:0">Einladung einfügen</h1></div>
+    <p class="note" style="margin:0">Die Nachricht mit der Einladung in WhatsApp lange drücken und kopieren, dann hier einsetzen. Die Reise wird angelegt und der Stand der anderen Person geholt.</p>
+    <div class="field wide"><label for="iv-pw">Reise-Passwort <span class="hint">(dasselbe wie bei der anderen Person)</span></label><input id="iv-pw" type="password" autocomplete="off" value="${esc(pw0)}"></div>
+    <div class="field wide"><label for="iv-text">Einladung</label><textarea id="iv-text" rows="4" placeholder="Lange tippen und „Einsetzen“"></textarea></div>
+    <p class="note" id="iv-status" aria-live="polite" style="margin:0"></p>`, (root) => {
+    const q = (x) => root.querySelector(x), st = q("#iv-status");
+    // liegt die Einladung schon in der Zwischenablage, gleich einsetzen (fragt je nach Handy um Erlaubnis)
+    if (navigator.clipboard && navigator.clipboard.readText) navigator.clipboard.readText().then((t) => { if (/RD[01]\./.test(t || "") && !q("#iv-text").value) { q("#iv-text").value = t; st.textContent = "Einladung aus der Zwischenablage eingesetzt."; } }).catch(() => {});
+    setTimeout(() => (pw0 ? q("#iv-text") : q("#iv-pw"))?.focus(), 80);
+    q("#k-save").addEventListener("click", async (ev) => {
+      const pw = q("#iv-pw").value, text = q("#iv-text").value.trim();
+      if (pw.length < 8) { st.textContent = "Bitte das Reise-Passwort eintragen (mindestens 8 Zeichen)."; q("#iv-pw").focus(); return; }
+      if (!text) { st.textContent = "Bitte die Einladung einsetzen."; q("#iv-text").focus(); return; }
+      ev.currentTarget.disabled = true; st.textContent = "Lese die Einladung …";
+      const ok = await importMessageText(text, { pw, status: st });
+      if (!ok) ev.currentTarget.disabled = false;
+    });
+  });
 }
 function newTripSheet() {
   const tpl = packTemplate();
