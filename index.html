@@ -8,10 +8,10 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Reise">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="referrer" content="no-referrer">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' blob: data: https://*.workers.dev https://api.open-meteo.com https://cdn.jsdelivr.net https://*.currency-api.pages.dev https://api.frankfurter.dev; object-src 'none'; base-uri 'self'; form-action 'none'">
-<link rel="manifest" href="manifest.webmanifest?v=62">
+<link rel="manifest" href="manifest.webmanifest?v=63">
 <link rel="icon" href="koffer-192.png">
 <link rel="apple-touch-icon" href="koffer-180.png">
 <title>Reise</title>
@@ -67,6 +67,9 @@
 [hidden] { display: none !important; }
 body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--f); font-size: 15px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
 button, input, select, textarea { font: inherit; color: inherit; }
+/* iPhone: Eingabefelder unter 16 px lassen Safari beim Tippen hineinzoomen, die Seite bleibt danach vergrössert */
+input, select, textarea { font-size: 16px; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 a { color: inherit; }
 :focus-visible { outline: 1.5px solid var(--wood); outline-offset: 3px; }
 .num { font-variant-numeric: tabular-nums; }
@@ -712,7 +715,7 @@ details.tips[open] summary span:last-child { transform: rotate(45deg); }
 .prev { display: grid; gap: 10px; padding: 14px 0; border-bottom: 1px solid var(--line); }
 .prev.off { opacity: .45; }
 .prev-top { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: start; }
-.prev textarea { width: 100%; min-width: 0; border: 0; border-bottom: 1px solid var(--line-strong); background: transparent; padding: 4px 0; resize: vertical; min-height: 44px; font-size: 14px; }
+.prev textarea { width: 100%; min-width: 0; border: 0; border-bottom: 1px solid var(--line-strong); background: transparent; padding: 4px 0; resize: vertical; min-height: 44px; font-size: 16px; }
 .prev .pr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
 .setgroup { display: grid; gap: 10px; }
 .legs.privacy li span:first-child { min-width: 0; }
@@ -3650,8 +3653,28 @@ async function importMessageText(text) {
   }
   setPref("msgparts", "");
   if (payload && payload.format === "reise-abgleich") {
-    if (!/^https:\/\/[^\s/]+\.workers\.dev\/?$/.test(payload.url || "") || !payload.token || !payload.room) { status.textContent = "Die Einladung ist unvollständig."; return false; }
+    if (!syncUrlOk(payload.url || "") || !payload.token || !payload.room) { status.textContent = "Die Einladung ist unvollständig."; return false; }
     setPref("pw", pw);   // für den Abgleich im Hintergrund nötig
+    // Gehört die Einladung zu dieser Reise? Sonst (Übersicht, andere Reise, Reise gleicht schon woanders ab) eine neue Reise anlegen
+    const sameRoom = syncCfg() && syncCfg().room === payload.room;
+    const titleFits = payload.tripTitle && S.trip && S.trip.title && norm(payload.tripTitle) === norm(S.trip.title);
+    const fresh = !S.events.length && !S.trip?.start;
+    const useHere = sameRoom || (!syncCfg() && S.view !== "trips" && (titleFits || fresh || !payload.tripTitle));
+    if (!useHere) {
+      const other = tripsGet().find((t) => { try { const c = JSON.parse(pref("sync-" + t.id, "null")); return c && c.room === payload.room; } catch { return false; } });
+      if (other) { status.textContent = `Diese Einladung gehört zur Reise „${other.title || "Reise"}“, die hier schon abgeglichen wird.`; enterTrip(other.id); return true; }
+      const id = "t" + newId().slice(0, 10), db = "reiseplaner-" + id, now = Date.now(), title = payload.tripTitle || "Reise";
+      const me = (people()[0] && people()[0] !== "Person B") ? people()[0] : "Ich";
+      try {
+        await writeIntoDb(db, [{ key: "trip/meta", coll: "trip", id: "meta", data: { title, start: payload.start || "", end: payload.end || payload.start || "", homeTz: deviceTz(), travelers: [me], phases: [] }, updatedAt: 0, deleted: false }], {});
+        const a = tripsGet(); a.push({ id, db, title, start: payload.start || "", end: payload.end || "", countries: [], created: now }); tripsSet(a);
+      } catch { status.textContent = "Die Reise liess sich nicht anlegen."; return false; }
+      setPref("sync-" + id, JSON.stringify({ url: payload.url, token: payload.token, room: payload.room }));
+      setPref("syncstore", JSON.stringify({ url: payload.url, token: payload.token }));
+      status.textContent = `Reise „${title}“ angelegt. Öffne sie und hole den Stand …`;
+      toast(`Reise „${title}“ angelegt, Abgleich läuft`);
+      enterTrip(id); return true;
+    }
     setSyncCfg({ url: payload.url, token: payload.token, room: payload.room });
     status.textContent = "Automatischer Abgleich eingerichtet. Hole den Stand der anderen Person …";
     const r = await syncNow("manual");
@@ -5967,8 +5990,14 @@ function remAskPush() {
    Zusammengeführt wird wie beim Einlesen: pro Eintrag gilt der neuere. Der Speicher sieht nur „RD1.…“-Text. */
 const SY = { timer: null, busy: false, dirty: false };
 function syncKey() { return "sync-" + TRIP.id; }
+// Adresse des eigenen Speichers: ein Cloudflare-Worker (zum Testen auch ein lokaler Server)
+function syncUrlOk(u) { return /^https:\/\/[^\s/]+\.workers\.dev\/?$/.test(u) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/[\w-]*)?\/?$/.test(u); }
 function syncCfg() { try { const c = JSON.parse(pref(syncKey(), "null")); return c && c.url && c.token && c.room ? c : null; } catch { return null; } }
-function setSyncCfg(c) { setPref(syncKey(), c ? JSON.stringify(c) : ""); }
+function setSyncCfg(c) { setPref(syncKey(), c ? JSON.stringify(c) : ""); if (c && c.url && c.token) setPref("syncstore", JSON.stringify({ url: c.url, token: c.token })); }
+// der eigene Speicher (Adresse und Schlüssel) gilt für alle Reisen; pro Reise gibt es nur einen eigenen Raum
+function syncStore() { if (S.syncOther) return null; try { const c = JSON.parse(pref("syncstore", "null")); if (c && c.url && c.token) return c; } catch {} for (const t of tripsGet()) { try { const c = JSON.parse(pref("sync-" + t.id, "null")); if (c && c.url && c.token) return { url: c.url, token: c.token }; } catch {} } return null; }
+// Abgleich für eine Reise mit dem bekannten Speicher einrichten (neuer Raum)
+function syncSetupWithStore(tripId) { const st = syncStore(); if (!st) return null; const c = { url: st.url, token: st.token, room: rndCode(16) }; setPref("sync-" + tripId, JSON.stringify(c)); return c; }
 function syncDev() { let d = pref("syncdev", ""); if (!/^[A-Za-z0-9]{8,}$/.test(d)) { d = rndCode(12); setPref("syncdev", d); } return d; }
 function rndCode(n) { const A = "ACDEFHJKLMNPRTUVWXYacdefhjkmnprtuvwxy34679"; return Array.from(crypto.getRandomValues(new Uint8Array(n)), (x) => A[x % A.length]).join(""); }
 function syncState() { try { return JSON.parse(pref("syncstate-" + TRIP.id, "{}")) || {}; } catch { return {}; } }
@@ -6038,8 +6067,8 @@ function syncErrText(code) {
 }
 async function syncInvite() {
   const c = syncCfg(), pw = pref("pw", ""); if (!c || !pw) return;
-  const code = await packMessage({ format: "reise-abgleich", url: c.url, token: c.token, room: c.room, tripTitle: (S.trip && S.trip.title) || "" }, pw);
-  const r = await sendText(`Einladung zum automatischen Abgleich der Reise-App. In der App: oben rechts ··· → Sichern und abgleichen → „Aus Nachricht einfügen“. Danach diese Nachricht löschen.\n\n${code}`);
+  const code = await packMessage({ format: "reise-abgleich", url: c.url, token: c.token, room: c.room, tripTitle: (S.trip && S.trip.title) || "", start: (S.trip && S.trip.start) || "", end: (S.trip && S.trip.end) || "" }, pw);
+  const r = await sendText(`Einladung zur Reise „${(S.trip && S.trip.title) || "Reise"}“ in der Reise-App. Nachricht kopieren, dann in der App: oben rechts ··· → Sichern und abgleichen → Passwort eintragen → „Aus Nachricht einfügen“. Die Reise wird angelegt und geholt. Danach diese Nachricht löschen.\n\n${code}`);
   if (r === "copied") toast("Einladung kopiert. An die andere Person schicken.");
 }
 
@@ -6060,6 +6089,11 @@ function syncBoxHtml() {
       <div class="actions"><button class="btn" type="button" id="st-syncnow">Jetzt abgleichen</button><button class="btn" type="button" id="st-syncinv">Einladung teilen</button><button class="btn quiet" type="button" id="st-syncoff">Ausschalten</button></div>
       <label class="check" style="margin-top:8px"><input type="checkbox" id="st-syncwifi" ${pref("syncwifi", "1") === "1" ? "checked" : ""}> Unterwegs nur im WLAN abgleichen (wirkt nur auf Android)</label>
       <p class="note" style="margin:6px 0 0">Gleicht beim Öffnen, nach Änderungen und alle 15 Minuten ab, solange die App offen ist. Tickets gehen nicht mit, dafür weiterhin „Alles sichern“.</p></div>`;
+  const st = syncStore();
+  if (st) return `<div style="display:grid;gap:12px">
+      <p class="note" style="margin:0">Euer Speicher ist schon bekannt (${esc(st.url.replace(/^https:\/\//, ""))}). Für diese Reise braucht es nur einen Raum darin.</p>
+      <div class="actions"><button class="btn solid" type="button" id="st-syncquick">Abgleich einrichten</button><button class="btn quiet" type="button" id="st-syncother">Anderen Speicher</button></div>
+      <p class="note" id="st-syncmsg" aria-live="polite" style="margin:0">Danach „Einladung teilen“: die andere Person fügt sie ein, die Reise wird bei ihr angelegt und geholt.</p></div>`;
   return `<div style="display:grid;gap:12px">
       <p class="note" style="margin:0">Beide Handys gleichen sich selbst ab, über euren eigenen kleinen Speicher. Ein Handy richtet ihn ein und teilt eine Einladung, das andere fügt sie unter „Aus Nachricht einfügen“ ein. Alles bleibt mit eurem Passwort verschlüsselt.</p>
       <div class="field wide"><label for="st-syncurl">Adresse des Speichers</label><input id="st-syncurl" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://reise-abgleich.name.workers.dev"></div>
@@ -6072,12 +6106,22 @@ function bindSyncBox() {
   $("st-syncinv")?.addEventListener("click", () => syncInvite());
   $("st-syncoff")?.addEventListener("click", () => { setSyncCfg(null); setPref("syncstate-" + TRIP.id, ""); toast("Automatischer Abgleich ausgeschaltet"); renderSettings(); });
   $("st-syncwifi")?.addEventListener("change", (ev) => setPref("syncwifi", ev.target.checked ? "1" : "0"));
+  $("st-syncother")?.addEventListener("click", () => { setPref("syncstore", ""); S.syncOther = true; renderSettings(); });
+  $("st-syncquick")?.addEventListener("click", async (ev) => {
+    const pw = $("st-pw").value, msg = $("st-syncmsg");
+    if (pw.length < 8) { msg.textContent = "Oben zuerst das Reise-Passwort eintragen."; $("st-pw").focus(); return; }
+    ev.currentTarget.disabled = true; setPref("pw", pw);
+    if (!syncSetupWithStore(TRIP.id)) { renderSettings(); return; }
+    const r = await syncNow("manual");
+    syncBoot(); renderSettings();
+    toast(r && r.ok ? "Eingerichtet. Jetzt die Einladung teilen." : syncErrText(r && r.error));
+  });
   $("st-syncsetup")?.addEventListener("click", async (ev) => {
     const msg = $("st-syncmsg"), btn = ev.currentTarget;
     let url = $("st-syncurl").value.trim(); const token = $("st-synctoken").value.trim(), pw = $("st-pw").value;
     if (url && !/^https?:\/\//.test(url)) url = "https://" + url;
     url = url.replace(/\/+$/, "");
-    if (!/^https:\/\/[^\s/]+\.workers\.dev$/.test(url)) { msg.textContent = "Die Adresse endet auf „.workers.dev“ und steht in Cloudflare beim Worker."; return; }
+    if (!syncUrlOk(url)) { msg.textContent = "Die Adresse endet auf „.workers.dev“ und steht in Cloudflare beim Worker."; return; }
     if (token.length < 16) { msg.textContent = "Der Schlüssel ist zu kurz (mindestens 16 Zeichen)."; return; }
     if (pw.length < 8) { msg.textContent = "Oben zuerst das Reise-Passwort eintragen."; $("st-pw").focus(); return; }
     btn.disabled = true; msg.textContent = "Prüfe den Speicher …";
@@ -6102,7 +6146,7 @@ function syncBoot() {
     else if (SY.dirty) { clearTimeout(SY.timer); syncNow("leave"); }
   });
 }
-const APP_VERSION = "62";
+const APP_VERSION = "63";
 // angezeigt als 1.x: Build 1 = 1.0, 2 = 1.1, 3 = 1.2 … (der Cache zählt weiter mit der Build-Nummer)
 function appVersionShown() { return "1." + Math.max(0, +APP_VERSION - 1); }
 /* ---------- Render & boot ---------- */
@@ -7054,9 +7098,9 @@ function chooseBoot() {
   if (qTrip && byId(qTrip)) return { trip: byId(qTrip), view: "trip" };
   if (wheel) return { trip: last, view: "trips" };
   if (a.length <= 1) return { trip: a[0], view: "trip" };
+  // mehrere Reisen: immer auf der Übersicht beginnen, die laufende Reise steht dort in der Mitte
   const act = a.filter((t) => tripActive(t, td)).sort((x, y) => x.start.localeCompare(y.start))[0];
-  if (act) return { trip: act, view: "trip" };
-  return { trip: last, view: "trips" };
+  return { trip: act || last, view: "trips" };
 }
 function isoName(iso) { try { return new Intl.DisplayNames(["de"], { type: "region" }).of(iso); } catch { return iso; } }
 function tripCountries() {
@@ -7201,6 +7245,7 @@ function newTripSheet() {
     </div>
     ${tpl.length ? `<label class="check"><input type="checkbox" id="nt-pack" checked> Gemerkte Packliste übernehmen (${tpl.length} Teile)</label>` : ""}
     ${S.kasse ? `<label class="check"><input type="checkbox" id="nt-kasse" checked> Kasse mit denselben Namen und derselben Währung einrichten</label>` : ""}
+    ${syncStore() && pref("pw", "") ? `<label class="check"><input type="checkbox" id="nt-sync" checked> Abgleich einrichten, damit du gleich eine Einladung teilen kannst</label>` : ""}
     <p class="note" style="margin:0">Termine, Tipps und Kasse sind pro Reise getrennt. Die Daten kannst du später auch mit einer Reisedatei einlesen.</p>`, (root) => {
     const q = (x) => root.querySelector(x);
     setTimeout(() => q("#nt-title")?.focus(), 80);
@@ -7220,6 +7265,7 @@ function newTripSheet() {
       try {
         await writeIntoDb(db, docs, {});
         const a = tripsGet(); a.push({ id, db, title, start, end, countries: [], created: now }); tripsSet(a);
+        if (q("#nt-sync") && q("#nt-sync").checked && syncSetupWithStore(id)) { try { sessionStorage.setItem("ar-invite", "1"); } catch {} }
         kCloseForm(); enterTrip(id);
       } catch { toast("Anlegen ging nicht."); }
     });
@@ -7236,7 +7282,9 @@ render();
 setInterval(tickCountdown, 30000);
 setInterval(rerender, 300000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) rerender(); });
-loadAll().then(() => { S.loaded = true; S.live = true; emit(); takeShared(); syncBoot(); aiCheckReturn(); remBoot(); phBoot(); }).catch(() => { S.loaded = true; S.loadError = true; render(); });
+loadAll().then(() => { S.loaded = true; S.live = true; emit(); takeShared(); syncBoot(); aiCheckReturn(); remBoot(); phBoot();
+  let inv = false; try { inv = sessionStorage.getItem("ar-invite") === "1"; sessionStorage.removeItem("ar-invite"); } catch {}
+  if (inv && syncCfg()) setTimeout(() => { openSettings("trip", "sync"); toast("Abgleich eingerichtet. Jetzt „Einladung teilen“."); }, 900); }).catch(() => { S.loaded = true; S.loadError = true; render(); });
 if ("serviceWorker" in navigator && (location.protocol === "https:" || /^(localhost|127\.0\.0\.1)$/.test(location.hostname))) {
   const hadController = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then((r) => r.update()).catch(() => {});
