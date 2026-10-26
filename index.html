@@ -11,7 +11,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="referrer" content="no-referrer">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' blob: data: https://*.workers.dev https://api.open-meteo.com https://cdn.jsdelivr.net https://*.currency-api.pages.dev https://api.frankfurter.dev; object-src 'none'; base-uri 'self'; form-action 'none'">
-<link rel="manifest" href="manifest.webmanifest?v=63">
+<link rel="manifest" href="manifest.webmanifest?v=64">
 <link rel="icon" href="koffer-192.png">
 <link rel="apple-touch-icon" href="koffer-180.png">
 <title>Reise</title>
@@ -378,6 +378,12 @@ a { color: inherit; }
 /* Karte */
 .mapframe { border-radius: 4px; overflow: hidden; border: 1px solid var(--line); background: var(--sea); }
 .maptools { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; }
+.reisetools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.rfbtn { padding: 8px 14px; font-size: 13px; color: var(--muted); }
+.rfbtn svg { width: 15px; height: 15px; }
+.rfbtn.on { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
+.rfbtn .x { margin-left: 2px; opacity: .8; }
+.rfbtn .cw svg { color: var(--wood); }
 .seg { display: inline-flex; width: max-content; max-width: 100%; justify-self: start; gap: 0; border: 1px solid var(--line-strong); border-radius: 999px; padding: 3px; }
 .seg button { border: 0; background: transparent; border-radius: 999px; padding: 6px 12px; font-size: 13px; cursor: pointer; color: var(--muted); }
 .seg button[aria-pressed="true"], .seg button[aria-selected="true"] { background: var(--ink); color: var(--on-ink); }
@@ -856,8 +862,8 @@ ul.steps { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--
     <div id="reise-head"></div>
     <div class="reisetools">
       <div class="seg" id="reise-view" role="tablist" aria-label="Ansicht"><button type="button" role="tab" data-rv="list" aria-selected="true">Stationen</button><button type="button" role="tab" data-rv="map" aria-selected="false">Karte</button></div>
+      <button class="btn rfbtn" type="button" id="reise-filter" aria-haspopup="dialog">Filter</button>
     </div>
-    <div class="chips" id="reise-filter" role="group" aria-label="Filter"></div>
     <div id="reise-map" hidden style="display:grid;gap:14px">
       <div class="maptools">
         <div class="seg" id="zoomseg" role="group" aria-label="Ausschnitt"><button type="button" data-zoom="all" aria-pressed="true">Alles</button></div>
@@ -914,7 +920,7 @@ ul.steps { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--
       <div class="field" data-step="when"><label for="f-etime" id="l-etime">Uhrzeit Ende</label><input id="f-etime" inputmode="numeric" maxlength="5" autocomplete="off" placeholder="hh:mm" enterkeyhint="next"></div>
       <div class="field wide" data-step="when"><button type="button" class="linkbtn" id="f-addend" style="padding:0" hidden>Ende hinzufügen</button></div>
       <div class="field wide" data-step="ticket"><label for="f-booking">Buchungsnummer, Sitzplatz</label><input id="f-booking" autocomplete="off"></div>
-      <div class="field wide" data-step="rest"><label class="check" style="text-transform:none;letter-spacing:0;color:var(--ink);font-size:14px"><input type="checkbox" id="f-tentative"> Noch nicht fix: zu buchen, zu klären oder nur ein Vorschlag</label></div>
+      <div class="field wide" data-step="rest"><label class="check" style="text-transform:none;letter-spacing:0;color:var(--ink);font-size:14px"><input type="checkbox" id="f-tentative"> Nur ein Vorschlag, noch nicht fix</label></div>
       <div class="field wide" data-step="ticket"><label for="f-links">Links</label><textarea id="f-links" rows="2" autocomplete="off" placeholder="Swiss: https://www.swiss.com/…"></textarea><span class="hint">Buchungsportal, Airline-App, Check-in. Ein Link pro Zeile, optional mit Namen davor.</span></div>
       <div class="field wide" data-step="ticket"><label for="f-files">Tickets</label>
         <div class="attlist" id="f-attlist"></div>
@@ -922,6 +928,7 @@ ul.steps { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--
         <span class="hint">PDF, JPG oder PNG, bis 20 MB.</span>
       </div>
     </div>
+    <button type="button" class="linkbtn" id="f-moretgl" style="padding:0;justify-self:start" hidden>Mehr: Ticket, Buchungsnummer, Notizen …</button>
     <details class="tips" id="f-more" data-step="rest"><summary><span>Weitere Angaben</span><span>+</span></summary>
       <div class="fgrid" style="padding-bottom:18px">
         <div class="field wide"><label for="f-address">Adresse</label><input id="f-address" autocomplete="off"></div>
@@ -1047,6 +1054,7 @@ const UI = {
   arrow: P("M4 12h16M14 6l6 6-6 6"),
   chev: P("M9 6l6 6-6 6"),
   search: P("M17 10.5a6.5 6.5 0 1 1-13 0 6.5 6.5 0 0 1 13 0zM20 20l-4.6-4.6"),
+  filter: P("M4 6h16M7 12h10M10 18h4"),
   nav: P("M12 21s-7-6.1-7-11.5a7 7 0 0 1 14 0C19 14.9 12 21 12 21z") + '<circle cx="12" cy="9.5" r="2.3"/>',
   ticket: P("M3.5 8a2 2 0 0 0 2-2h13a2 2 0 0 0 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 0-2 2h-13a2 2 0 0 0-2-2v-2a2 2 0 0 0 0-4z"),
   check: P("M5 12.5l4.5 4.5L19 7.5"),
@@ -1314,7 +1322,7 @@ function renderHeute() {
   const wxTwo = wxA && wxB && norm(wxA) !== norm(wxB) ? [[wxA, wxDay(wxA, td)], [wxB, wxDay(wxB, td)]].filter((x) => x[1]) : [];
   const wxHtml = wxTwo.length === 2 ? `<button class="wxb two" type="button" id="hp-wx" aria-label="Wetter in ${esc(wxA)} und ${esc(wxB)}">${wxTwo.map(([p, w]) => `<span>${esc(p)} ${esc(wxShort(w))}</span>`).join("")}</button>`
     : wxNow ? `<button class="wxb" type="button" id="hp-wx" aria-label="Wetter in ${esc(wxPlace)}">${esc(wxShort(wxNow))}</button>` : "";
-  let head = `<div><div class="sh"><div><div class="eyebrow">${f.wdl}, ${f.d}. ${f.mo}${over ? " · zurück" : ph ? " · " + esc(ph.name) : ""}</div><h1>${over ? "Willkommen zurück" : greeting()}</h1></div><div class="sh-r">${statusHtml()}${wxHtml}</div></div></div>`;
+  let head = `<div><div class="sh"><div><div class="eyebrow">${f.wdl}, ${f.d}. ${f.mo}${over ? " · zurück" : ph ? " · " + esc(ph.name) : ""}</div><h1>${over ? "Willkommen zurück" : greeting()}</h1></div><div class="sh-r">${statusHtml()}${wxHtml}${S.loaded && S.trip && !over ? `<div class="hbtns"><button class="add" type="button" id="hp-search" aria-label="Suchen">${ui("search")}</button>${canEdit() ? `<button class="add" type="button" id="hp-add" aria-label="Hinzufügen">${ui("plus")}</button>` : ""}</div>` : ""}</div></div></div>`;
   const bindTop = () => {};   // „Alle Reisen“ steht in der Leiste oben (render)
   if (!S.loaded) { s.innerHTML = head; bindTop(); return; }
   if (over) {
@@ -1414,6 +1422,8 @@ function renderHeute() {
   bindTop();
   bindRows(s);
   const hp = $("hpay"); if (hp) hp.addEventListener("click", () => kExpenseSheet(null));
+  $("hp-search")?.addEventListener("click", openSearch);
+  $("hp-add")?.addEventListener("click", heuteAddChooser);
   $("hp-kasse")?.addEventListener("click", () => { if (kDayAvg(S.kasse)) kAvgSheet(); else setTab("kasse"); });
   const h1 = $("hp-pack"); if (h1) h1.addEventListener("click", () => setTab("packen"));
   $("hp-ideas")?.addEventListener("click", () => openIdeas(idPlace));
@@ -1434,6 +1444,23 @@ function renderHeute() {
   $("hp-morgen")?.addEventListener("toggle", (ev) => { S.morgenOpen = ev.currentTarget.open; });
   const a = s.querySelector(".hero [data-att]"); if (a && next) a.addEventListener("click", () => openAttachment((next.attachments || [])[0]));
   bindDayWheel();
+}
+// „+“ auf Heute: was unterwegs schnell anfällt
+function heuteAddChooser() {
+  const td = today(), place = phHere() || placeOn(td) || "";
+  kOpenForm(`${kTop("")}
+    <div><p class="wstep">Heute</p><h1 class="dt-title" style="margin:0">Was möchtest du festhalten?</h1></div>
+    <div class="kmenu">
+      ${S.kasse ? `<button class="morerow" type="button" id="ha-pay"><span>Zahlung</span><span>${ui("chev")}</span></button>` : ""}
+      <button class="morerow" type="button" id="ha-photo"><span>Fotos${place ? ` <small class="muted" style="font-weight:400">· ${esc(place)}</small>` : ""}</span><span>${ui("chev")}</span></button>
+      <button class="morerow" type="button" id="ha-event"><span>Termin für heute<br><small class="muted" style="font-weight:400">Essen, Ausflug, Fahrt …</small></span><span>${ui("chev")}</span></button>
+      <button class="morerow" type="button" id="ha-idea"><span>Idee merken</span><span>${ui("chev")}</span></button>
+    </div>`, (root) => {
+    root.querySelector("#ha-pay")?.addEventListener("click", () => { kCloseForm(); kExpenseSheet(null); });
+    root.querySelector("#ha-photo").addEventListener("click", () => { kCloseForm(); openPhotos(place || undefined); setTimeout(() => $("fo-file")?.click(), 350); });
+    root.querySelector("#ha-event").addEventListener("click", () => { kCloseForm(); openForm(null, { sdate: td, place: placeOn(td) || "" }); });
+    root.querySelector("#ha-idea").addEventListener("click", () => { kCloseForm(); openIdeas(place || ideaDefaultPlace()); });
+  });
 }
 function greeting() {
   const h = +(parts(Date.now(), deviceTz()).hour || 12);
@@ -1720,7 +1747,9 @@ function renderReise() {
   const manyPlaces = stations().filter((st) => st.key).length >= 5;
   if (S.rFilter === "dup" && !(nConf && manyPlaces)) S.rFilter = "all";
   const chipW = nConf && manyPlaces ? `<button type="button" class="chip chip-w" data-rf="dup" aria-pressed="${S.rFilter === "dup"}">${warnI()}${nConf} prüfen</button>` : "";
-  $("reise-filter").innerHTML = RFILTERS.map(([k, l]) => `<button type="button" class="chip" data-rf="${k}" aria-pressed="${S.rFilter === k}">${l}</button>${k === "all" ? chipW : ""}`).join("");
+  // ein Filterknopf statt einer Reihe Chips; aktiv zeigt er die Auswahl und ein × zum Zurücksetzen
+  const fl = S.rFilter === "dup" ? `${nConf} prüfen` : (RFILTERS.find(([k]) => k === S.rFilter) || [])[1];
+  const fb = $("reise-filter"); fb.classList.toggle("on", S.rFilter !== "all"); fb.innerHTML = S.rFilter === "all" ? `${ui("filter")}Filter${chipW ? ` <span class="cw">${warnI()}</span>` : ""}` : `${esc(fl)} <span class="x" aria-label="Filter zurücksetzen">✕</span>`;
   const now = Date.now(), td = today();
   let body = "";
   if (!evs.length) body = `<div class="empty"><b>Noch keine Termine</b><span>Tippe oben auf +, um Flug, Zug, Unterkunft oder einen Ausflug einzutragen.</span></div>`;
@@ -1823,7 +1852,9 @@ function renderReise() {
   }
   const open = S.packing.filter((p) => (!p.mode || p.mode === "pack") && !isPacked(p)).length;
   const packRow = `<button class="morerow" type="button" id="openpack"><span>Packliste</span><span>${S.packing.length ? (open ? `${open} offen` : "alles gepackt") : "noch leer"}${ui("chev")}</span></button>`;
-  $("reise-list").innerHTML = `<div class="stations">${body}</div>` + (S.trip || S.packing.length ? `<div style="margin-top:34px">${packRow}</div>` : "");
+  const nPh = (S.photos || []).length;
+  const photoRow = S.trip ? `<button class="morerow" type="button" id="openphotos"><span>Fotos und Link für Freunde</span><span>${shareCfg() ? "Link aktiv" : nPh ? `${nPh} ${nPh === 1 ? "Foto" : "Fotos"}` : ""}${ui("chev")}</span></button>` : "";
+  $("reise-list").innerHTML = `<div class="stations">${body}</div>` + (S.trip || S.packing.length ? `<div style="margin-top:34px" class="kmenu">${packRow}${photoRow}</div>` : "");
   const root = $("reise-list");
   bindRows(root);
   root.querySelectorAll("[data-place]").forEach((b) => b.addEventListener("click", () => openPlace(b.dataset.place)));
@@ -1834,10 +1865,21 @@ function renderReise() {
   root.querySelectorAll("details.station").forEach((d) => d.addEventListener("toggle", () => { const set = stOpenSet(); if (d.open) set.add(d.dataset.st); else set.delete(d.dataset.st); }));
   root.querySelectorAll("details.land").forEach((d) => d.addEventListener("toggle", () => { const set = landOpenSet(); if (d.open) set.add(d.dataset.land); else set.delete(d.dataset.land); }));
   root.querySelectorAll("details.dcard").forEach((d) => d.addEventListener("toggle", () => { if (!S.dayOpen) S.dayOpen = new Map(); S.dayOpen.set(d.dataset.dk, d.open); }));
-  $("reise-filter").querySelectorAll("[data-rf]").forEach((b) => b.addEventListener("click", () => { S.rFilter = b.dataset.rf; renderReise(); }));
+  $("reise-filter").onclick = (e) => { if (S.rFilter !== "all" && e.target.closest(".x")) { S.rFilter = "all"; renderReise(); return; } reiseFilterSheet(nConf && manyPlaces ? nConf : 0); };
   const op = $("openpack"); if (op) op.addEventListener("click", () => setTab("packen"));
+  $("openphotos")?.addEventListener("click", () => openPhotos());
 }
 $("reise-view").querySelectorAll("[data-rv]").forEach((b) => b.addEventListener("click", () => { S.rView = b.dataset.rv; renderReise(); }));
+// Filter als Auswahl in einem Blatt (wie bei Buchungs-Apps): eine Zeile pro Filter, Antippen wählt und schliesst
+function reiseFilterSheet(nConf) {
+  const hint = { all: "Alles, was eingetragen ist", move: "Flüge, Züge, Busse, Fähren, Transfers", hotel: "Nur die Unterkünfte", plan: "Ausflüge, Essen, Sonstiges", open: "Noch zu buchen oder zu klären" };
+  const list = RFILTERS.map(([k, l]) => [k, l, hint[k]]); if (nConf) list.push(["dup", `${nConf} prüfen`, "Möglicherweise doppelt oder gleichzeitig"]);
+  kOpenForm(`${kTop("")}
+    <div><p class="wstep">Reise</p><h1 class="dt-title" style="margin:0">Was anzeigen?</h1></div>
+    <div class="kmenu">${list.map(([k, l, h]) => `<button class="morerow" type="button" data-rfs="${k}" aria-pressed="${S.rFilter === k}"><span>${esc(l)}<br><small class="muted" style="font-weight:400">${esc(h)}</small></span><span>${S.rFilter === k ? ui("check") : ""}</span></button>`).join("")}</div>`, (root) => {
+    root.querySelectorAll("[data-rfs]").forEach((b) => b.addEventListener("click", () => { S.rFilter = b.dataset.rfs; kCloseForm(); renderReise(); }));
+  });
+}
 /* ---------- Suche (läuft komplett auf dem Gerät) ---------- */
 const qn = (s) => String(s || "").toLowerCase().replace(/ß/g, "ss").replace(/ä/g, "a").replace(/ö/g, "o").replace(/ü/g, "u").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/ae/g, "a").replace(/oe/g, "o").replace(/ue/g, "u");
 const QSTOP = new Set(qn("was wo wann wie wer ist sind war wird am an im in ich wir uns unser unsere haben habe hab hatten gibt gibts es etwas geplant plane planen noch schon da dort der die das den dem des ein eine einen einem einer für bei zu zum zur und oder mit auf nach vom von tag tage welche welcher welches welchen alles alle mal bitte zeig zeige mir sag sage machen mache wollen will sollen soll ob irgendwas irgendetwas eigentlich denn eingetragen steht stehen los gehts geht so bis").split(" "));
@@ -2238,7 +2280,7 @@ function openForm(ev, preset) {
   $("f-files").closest(".field").hidden = !S.assets;
   $("f-error").textContent = "";
   renderAttList(); syncFormType();
-  FW.on = !ev; FW.i = ev ? 0 : (preset && preset.type ? 1 : 0); FW.dateTouched = !!(ev || (preset && preset.sdate));
+  FW.on = !ev; FW.i = 0; FW.more = false; FW.preset = ev ? null : (preset || null); FW.dateTouched = !!(ev || (preset && preset.sdate));
   if (!ev && !(preset && preset.type)) { const r0 = document.querySelector('input[name="f-type"]:checked'); if (r0) r0.checked = false; }
   if (!ev && !e.from && !(preset && preset.from)) { const lastMove = sortedEvents().filter((x) => x.move && x.to).pop(); if (lastMove) $("f-from").value = lastMove.to; }
   fwShow();
@@ -2259,7 +2301,7 @@ function fillTzSelect() {
 }
 function suggestDate() { const t = today(); return S.trip && t < S.trip.start ? S.trip.start : t; }
 function closeForm() { $("evform").hidden = true; S.editing = null; S.pendingFiles = []; syncOverflow(); render(); }
-$("f-cancel").addEventListener("click", () => { if (FW.on && FW.i > 0) { FW.i--; $("f-error").textContent = ""; fwShow(); } else closeForm(); });
+$("f-cancel").addEventListener("click", () => closeForm());
 /* ---------- Time fields: type 930 or 1415, the colon comes by itself ---------- */
 function timeNorm(v) {
   let d = String(v || "").replace(/\D/g, "");
@@ -2284,12 +2326,7 @@ const TIME_OK = (v) => !v || /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
 
 /* ---------- New appointment: one question at a time ---------- */
 const FW = { on: false, i: 0, dateTouched: false };
-const FW_STEPS = ["type", "where", "when", "ticket", "rest"];
 function fwStation(name) { if (!name) return null; const k = norm(placeKey(name)); return kStationList().find((s2) => s2.key === k) || null; }
-function fwTitle() {
-  const t = formType(), move = TYPE[t].move;
-  return { type: "Worum geht es?", where: move ? "Von wo nach wo?" : "Wo?", when: "Wann?", ticket: "Ticket und Buchung", rest: "Name und Notizen" }[FW_STEPS[FW.i]];
-}
 function fwSuggestPlaces() {
   const box = $("f-sugg"); if (!box) return;
   const t = formType(), move = TYPE[t].move;
@@ -2326,51 +2363,45 @@ function fwDayChips() {
   box.hidden = false;
 }
 function fwShow() {
-  const form = $("form"), st = FW_STEPS[FW.i];
+  // Neuer Termin auf einer Seite: Art, Wo, Wann (und der Titel, wo er gebraucht wird). Ticket, Buchung, Notizen unter „Mehr“.
+  const form = $("form"), t = formType(), typed = !!document.querySelector('input[name="f-type"]:checked');
   form.classList.toggle("wizard", FW.on);
-  form.querySelectorAll("[data-step]").forEach((n) => n.classList.toggle("wz-hide", FW.on && n.dataset.step !== st));
-  const t = formType();
+  const main = new Set(["type", "where", "when"]);
+  form.querySelectorAll("[data-step]").forEach((n) => {
+    const st = n.dataset.step;
+    let hide = false;
+    if (FW.on) {
+      if (!typed && st !== "type") hide = true;   // erst die Art wählen, dann erscheint der Rest
+      else if (!main.has(st) && !FW.more) hide = true;
+      if (st === "rest" && n.contains($("f-title")) && typed && !TYPE[t].move && t !== "hotel") hide = false;   // Titel bei Ausflug, Essen, Sonstiges gleich oben
+    }
+    n.classList.toggle("wz-hide", hide);
+  });
   const showEnd = !FW.on || TYPE[t].move || t === "hotel" || $("f-edate").value || $("f-etime").value;
   $("f-edate").closest(".field").classList.toggle("wz-end", !showEnd);
   $("f-etime").closest(".field").classList.toggle("wz-end", !showEnd);
   $("f-addend").hidden = !!showEnd || !FW.on;
+  $("f-moretgl").hidden = !(FW.on && typed && !FW.more);
+  $("f-stepinfo").textContent = "";
+  $("f-cancel").innerHTML = ui("back", 1.6) + "Abbrechen";
+  $("f-save").textContent = "Speichern";
   if (FW.on) {
-    $("form-title").textContent = fwTitle();
-    $("f-stepinfo").textContent = `Neuer Termin · ${FW.i + 1} von ${FW_STEPS.length}`;
-    $("f-cancel").innerHTML = ui("back", 1.6) + (FW.i ? "Zurück" : "Abbrechen");
-    $("f-save").textContent = FW.i === FW_STEPS.length - 1 ? "Speichern" : "Weiter";
-    if (st === "where") fwSuggestPlaces();
-    if (st === "when") {
-      fwDayChips();
+    const pre = FW.preset || {};
+    $("form-title").textContent = typed ? { flight: "Neuer Flug", train: "Neue Zugfahrt", bus: "Neue Busfahrt", ferry: "Neue Fähre", transfer: "Neuer Transfer", hotel: "Neue Unterkunft", activity: "Neuer Ausflug", food: "Essen gehen" }[t] || "Neuer Termin"
+      : pre.from && pre.to ? `Wie geht es von ${pre.from} nach ${pre.to}?` : pre.to ? `Wie kommt ihr nach ${pre.to}?` : pre.from ? `Wie geht es ab ${pre.from} weiter?` : "Worum geht es?";
+    // Lücke in der Reise: nur Verkehrsmittel zur Auswahl
+    document.querySelectorAll("#f-types label").forEach((l) => { const v = l.querySelector("input").value; l.hidden = !typed && (pre.from || pre.to) && !TYPE[v].move; });
+    if (typed) {
+      fwSuggestPlaces(); fwDayChips();
       if (t === "hotel") { if (!$("f-stime").value) $("f-stime").value = "15:00"; if (!$("f-etime").value) $("f-etime").value = "11:00"; if (!$("f-edate").value && $("f-sdate").value) $("f-edate").value = dateOfDayNumber(dayNumber($("f-sdate").value) + 1); }
-    }
-    if (st === "rest") {
       const d = derive({ type: t, title: "", from: $("f-from").value.trim(), to: $("f-to").value.trim(), place: $("f-place").value.trim(), sdate: $("f-sdate").value });
-      $("f-title").placeholder = titleOf(d);
-      $("f-more").open = false;
+      $("f-title").placeholder = TYPE[t].move || t === "hotel" ? titleOf(d) : t === "food" ? "z. B. Ramen Fuunji" : "z. B. Tag in Asakusa";
+      if (!FW.more) $("f-more").open = false;
     }
-    $("evform").scrollTop = 0;
-    const first = { where: TYPE[t].move ? $("f-from").value ? $("f-to") : $("f-from") : $("f-place"), when: $("f-stime") }[st];
-    if (first && !first.value) setTimeout(() => first.focus({ preventScroll: true }), 60);
-  } else {
-    $("f-stepinfo").textContent = "";
-    $("f-cancel").innerHTML = ui("back", 1.6) + "Abbrechen";
-    $("f-save").textContent = "Speichern";
   }
 }
-function fwNext() {
-  const st = FW_STEPS[FW.i], err = $("f-error"); err.textContent = "";
-  if (st === "when") {
-    if (!$("f-sdate").value) { err.textContent = "Bitte ein Datum wählen."; return; }
-    for (const id of ["f-stime", "f-etime"]) { $(id).value = timeNorm($(id).value); if (!TIME_OK($(id).value)) { err.textContent = "Uhrzeit bitte als hh:mm, z. B. 09:30."; $(id).focus(); return; } }
-  }
-  FW.i = Math.min(FW.i + 1, FW_STEPS.length - 1); fwShow();
-}
-$("form").addEventListener("submit", (e) => {
-  if (!(FW.on && FW.i < FW_STEPS.length - 1)) return;
-  e.preventDefault(); e.stopImmediatePropagation(); fwNext();
-});
-$("f-types").addEventListener("change", () => { if (FW.on && FW.i === 0) setTimeout(fwNext, 180); });
+$("f-types").addEventListener("change", () => { if (FW.on) { fwShow(); const t = formType(), first = TYPE[t].move ? ($("f-from").value ? $("f-to") : $("f-from")) : (t === "hotel" ? $("f-place") : $("f-title")); if (first && !first.value) setTimeout(() => first.focus({ preventScroll: true }), 60); } });
+$("f-moretgl").addEventListener("click", () => { FW.more = true; fwShow(); });
 $("f-sugg").addEventListener("click", (e) => {
   const b = e.target.closest("[data-fill]"); if (!b) return;
   $(b.dataset.fill).value = b.dataset.v; fwApplyPlace();
@@ -2388,6 +2419,7 @@ $("form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   if (!S.db) return;
   const err = $("f-error"); err.textContent = "";
+  if (FW.on && !document.querySelector('input[name="f-type"]:checked')) { err.textContent = "Bitte zuerst wählen, worum es geht."; return; }
   const t = formType(), move = TYPE[t].move;
   const sdate = $("f-sdate").value;
   if (!sdate) { err.textContent = "Bitte ein Datum eintragen."; return; }
@@ -2398,6 +2430,7 @@ $("form").addEventListener("submit", async (ev) => {
   const edate = $("f-edate").value;
   if (edate && edate < sdate) { err.textContent = "Das Ende liegt vor dem Beginn."; return; }
   $("f-stime").value = timeNorm($("f-stime").value); $("f-etime").value = timeNorm($("f-etime").value);
+  for (const id of ["f-stime", "f-etime"]) if (!TIME_OK($(id).value)) { err.textContent = "Uhrzeit bitte als hh:mm, z. B. 09:30."; $(id).focus(); return; }
   if (!TIME_OK($("f-stime").value) || !TIME_OK($("f-etime").value)) { err.textContent = "Uhrzeit bitte als hh:mm, z. B. 09:30."; return; }
   const btn = $("f-save"); btn.disabled = true;
   try {
@@ -3819,7 +3852,8 @@ async function exportIcs() {
 /* ---------- Settings ---------- */
 function openSettings(mode, page) { S.setMode = mode === "app" ? "app" : "trip"; S.setPage = typeof page === "string" ? page : null; S.setDirect = !!S.setPage; S.confirmWipe = false; S.namesDraft = null; renderSettings(); showSheet("settings"); }
 function fmtWhen(ms) { if (!ms) return ""; const d = new Date(+ms); return `${fmtShort(localDateIn(+d, deviceTz()))}, ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; }
-const SET_PAGES = { sync: "Sichern und abgleichen", kasse: "Kasse", cal: "Erinnerungen", offline: "Offline-Mappe", names: "Namen", links: "Links und Karten", privacy: "Datenschutz und Version", wipe: "Daten löschen" };
+const SET_PAGES = { sync: "Sichern und abgleichen", kasse: "Kasse", cal: "Erinnerungen", offline: "Offline-Mappe", names: "Namen", links: "Links und Karten", privacy: "Datenschutz und Version", wipe: "Daten löschen", more: "Mehr" };
+const SET_MORE = ["cal", "offline", "links", "privacy"];   // selten gebraucht, unter „Mehr“
 function renderSettings() {
   const t = people();
   const lastEx = +pref("lastExport", "0"), lastIm = +pref("lastImport", "0");
@@ -3835,19 +3869,18 @@ function renderSettings() {
       row("privacy", SET_PAGES.privacy, "Version " + appVersionShown()),
       row("wipe", "Alles löschen", "", "danger")
     ] : [
-      row("photos", "Fotos und Link", shareCfg() ? "Link für Freunde" : (S.photos || []).length ? `${(S.photos || []).length} ${(S.photos || []).length === 1 ? "Foto" : "Fotos"}` : ""),
       row("sync", SET_PAGES.sync, syncCfg() ? "Abgleich " + (syncState().at ? agoText(syncState().at) : "eingerichtet") : lastEx ? "gesichert " + kSince(lastEx) : "noch nie gesichert"),
       row("kasse", SET_PAGES.kasse, S.kasse ? `${esc(kName("A"))} &amp; ${esc(kName("B"))} · ${esc(S.kasse.accountCur)}` : "nicht eingerichtet"),
-      row("cal", SET_PAGES.cal),
-      row("offline", SET_PAGES.offline, "Notfall-Kopie"),
       row("names", SET_PAGES.names, esc(t.length > 2 ? `${t.length} Personen` : t.length === 1 ? `${t[0]}, allein` : t.join(" & "))),
-      row("links", SET_PAGES.links, `${lm === "direct" ? "Direkt" : "Browser wählen"} · ${navApp() === "apple" ? "Apple Karten" : "Google Maps"}`),
-      row("privacy", SET_PAGES.privacy, "Version " + appVersionShown()),
+      row("more", SET_PAGES.more, "Erinnerungen, Offline-Mappe, Karten, Version"),
       row("wipe", SET_PAGES.wipe, "", "danger")
     ];
     body = `<div><div class="dt-kind">${app ? "Alle Reisen" : esc((S.trip && S.trip.title) || "Reise")}</div><h1 class="dt-title" style="margin:0">Einstellungen</h1></div>
       <div class="kmenu">${rows.join("")}</div>
       ${app ? `<p class="note" style="margin:0">Hier steht nur, was für die ganze App gilt. Sichern, Kasse, Erinnerungen und Namen findest du in der Reise oben rechts bei den drei Punkten.</p>` : ""}`;
+  } else if (pg === "more") {
+    body = `<div><div class="dt-kind">Einstellungen</div><h1 class="dt-title" style="margin:0">Mehr</h1></div>
+      <div class="kmenu">${row("cal", SET_PAGES.cal)}${row("offline", SET_PAGES.offline, "Notfall-Kopie")}${row("links", SET_PAGES.links, `${lm === "direct" ? "Direkt" : "Browser wählen"} · ${navApp() === "apple" ? "Apple Karten" : "Google Maps"}`)}${row("privacy", SET_PAGES.privacy, "Version " + appVersionShown())}</div>`;
   } else {
     const title = pg === "sync" && app ? "Reisedatei einlesen" : pg === "wipe" && app ? "Alles löschen" : SET_PAGES[pg];
     let c = "";
@@ -3937,10 +3970,10 @@ function renderSettings() {
         : `<div style="display:flex;flex-wrap:wrap;gap:4px 16px">${app ? "" : `<button class="btn quiet danger" type="button" id="st-wipe">Diese Reise vom Gerät löschen</button>`}<button class="btn quiet danger" type="button" id="st-wipeall">Alles löschen</button></div>`}`;
     body = `<div><div class="dt-kind">Einstellungen</div><h1 class="dt-title" style="margin:0">${title}</h1></div>${c}`;
   }
-  $("settings-in").innerHTML = `<div class="top"><button class="back" type="button" id="st-back">${ui("back", 1.6)}${pg && !S.setDirect ? "Einstellungen" : "Fertig"}</button></div>${body}`;
+  $("settings-in").innerHTML = `<div class="top"><button class="back" type="button" id="st-back">${ui("back", 1.6)}${pg && !S.setDirect ? (!app && SET_MORE.includes(pg) ? "Mehr" : "Einstellungen") : "Fertig"}</button></div>${body}`;
   $("settings").scrollTop = 0;
   const go = (page) => { S.setPage = page; S.setDirect = false; S.confirmWipe = false; S.namesDraft = null; renderSettings(); };
-  $("st-back").addEventListener("click", () => { if (S.setPage && !S.setDirect) go(null); else { S.confirmWipe = false; hideSheet("settings"); } });
+  $("st-back").addEventListener("click", () => { if (S.setPage && !S.setDirect) go(!app && SET_MORE.includes(S.setPage) ? "more" : null); else { S.confirmWipe = false; hideSheet("settings"); } });
   $("settings-in").querySelectorAll("[data-sp]").forEach((b) => b.addEventListener("click", () => {
     const k = b.dataset.sp;
     if (k === "photos") openPhotos();
@@ -6146,7 +6179,7 @@ function syncBoot() {
     else if (SY.dirty) { clearTimeout(SY.timer); syncNow("leave"); }
   });
 }
-const APP_VERSION = "63";
+const APP_VERSION = "64";
 // angezeigt als 1.x: Build 1 = 1.0, 2 = 1.1, 3 = 1.2 … (der Cache zählt weiter mit der Build-Nummer)
 function appVersionShown() { return "1." + Math.max(0, +APP_VERSION - 1); }
 /* ---------- Render & boot ---------- */
@@ -6324,7 +6357,7 @@ function kPayRow(t, x, withDate, hideWho, part) {
 }
 function renderKasse() {
   const s = $("s-kasse"), t = S.kasse;
-  const head = `<div class="sh"><div><div class="eyebrow">Ferienkosten${t ? " · " + esc(t.accountCur) : ""}</div><h1>Kasse</h1></div>${t && canEdit() ? `<button class="add" type="button" id="kadd" aria-label="Zahlung erfassen">${ui("plus")}</button>` : ""}</div>`;
+  const head = `<div class="sh"><div><div class="eyebrow">Ferienkosten${t ? " · " + esc(t.accountCur) : ""}</div><h1>Kasse</h1></div><div class="hbtns">${t && S.expenses.length ? `<button class="add" type="button" id="ksearch" aria-label="Suchen">${ui("search")}</button>` : ""}${t && canEdit() ? `<button class="add" type="button" id="kadd" aria-label="Zahlung erfassen">${ui("plus")}</button>` : ""}</div></div>`;
   if (!S.loaded) { s.innerHTML = head; return; }
   if (!t) {
     s.innerHTML = head + `<div class="empty"><b>Ferienkosten fair aufteilen</b><span>Erfasse jede Kartenzahlung in der Währung vor Ort. Sobald die Bank verbucht hat, trägst du den echten Betrag nach. Bis dahin rechnet die Kasse mit dem Tageskurs.</span></div>
@@ -6333,7 +6366,7 @@ function renderKasse() {
     return;
   }
   const nOpen = kOpenItems(t).length;
-  const seg = `<div class="seg" role="tablist" aria-label="Ansicht"><button type="button" role="tab" data-kv="ov" aria-selected="${KS.view === "ov"}">Übersicht</button><button type="button" role="tab" data-kv="list" aria-selected="${KS.view === "list"}">Zahlungen</button><button type="button" role="tab" data-kv="book" aria-selected="${KS.view === "book"}">Verbuchen${nOpen ? ` · ${nOpen}` : ""}</button></div>`;
+  const seg = `<div class="seg" role="tablist" aria-label="Ansicht"><button type="button" role="tab" data-kv="ov" aria-selected="${KS.view === "ov"}">Übersicht</button><button type="button" role="tab" data-kv="list" aria-selected="${KS.view === "list"}">Zahlungen</button><button type="button" role="tab" data-kv="book" aria-selected="${KS.view === "book"}">Bankbetrag${nOpen ? ` · ${nOpen}` : ""}</button></div>`;
   const body = KS.view === "list" ? kListHtml(t) : KS.view === "book" ? kBookHtml(t) : kOverviewHtml(t);
   s.innerHTML = head + seg + body;
   for (const [id, val] of Object.entries(KS.drafts)) { const i = document.getElementById("kbk-" + id); if (i) i.value = val; }
@@ -6354,7 +6387,7 @@ function kOverviewHtml(t) {
   const nOpen = kOpenItems(t).length;
   const lastEx = +pref("lastExport", "0");
   const stale = T.n && (!lastEx || Date.now() - lastEx > 2 * 864e5);
-  const notes = [nOpen ? `${nOpen} Zahlung${nOpen === 1 ? " ist" : "en sind"} noch geschätzt. <button class="linkbtn" type="button" data-kgo="book" style="padding:0">Verbuchen</button>` : "",
+  const notes = [nOpen ? `${nOpen} Zahlung${nOpen === 1 ? " ist" : "en sind"} noch geschätzt. <button class="linkbtn" type="button" data-kgo="book" style="padding:0">Bankbeträge eintragen</button>` : "",
     stale ? `${lastEx ? `Zuletzt gesichert ${kSince(lastEx)}.` : "Noch nicht gesichert."} <button class="linkbtn" type="button" data-kact="backup" style="padding:0">Jetzt sichern</button>` : ""].filter(Boolean);
   const m = new Map();
   for (const x of S.expenses) { if (kIsSettle(x)) continue; const a = kAcct(t, x); if (a.v == null) continue; const k = x.country || ""; const e = m.get(k) || { sum: 0, est: false }; e.sum += a.v; if (a.est) e.est = true; m.set(k, e); }
@@ -6369,7 +6402,7 @@ function kOverviewHtml(t) {
   </button>
   ${T.n ? `<div class="summary ksum">${col("shared", T.sh)}${col("A", T.A)}${col("B", T.B)}</div>` : `<div class="empty"><span>Noch keine Zahlungen erfasst.</span></div>`}
   ${notes.length ? `<p class="callout">${notes.join("<br>")}</p>` : ""}
-  <div class="actions">${T.n ? `<button class="btn" type="button" data-kact="csv">${ui("ext")}Als Tabelle sichern</button><button class="btn" type="button" data-kact="settle">${t.owner === "joint" ? "Einzahlung erfassen" : "Ausgleich erfassen"}</button>` : `<button class="btn solid" type="button" data-kact="add">Erste Zahlung erfassen</button>`}</div>
+  <div class="actions">${T.n ? `<button class="btn" type="button" data-kact="csv">${ui("ext")}Als Tabelle sichern</button><button class="btn" type="button" data-kact="settle">${t.owner === "joint" ? "Einzahlung erfassen" : "Rückzahlung erfassen"}</button>` : `<button class="btn solid" type="button" data-kact="add">Erste Zahlung erfassen</button>`}</div>
   <div class="kmenu">
     ${T.n ? `<details class="tips" id="kdet" ${KS.details ? "open" : ""}><summary><span>Gesamt, Kategorien und Länder</span><span>+</span></summary>
       <ul class="legs" style="margin-bottom:16px">
@@ -6595,7 +6628,7 @@ function kExpenseSheet(x) {
   const a = kAcct(t, x);
   const W = isNew;
   kOpenForm(`<div class="top"><button type="button" class="back" id="kx-back">${ui("back", 1.6)}Abbrechen</button><button type="button" class="btn solid" id="k-save">${W ? "Weiter" : "Speichern"}</button></div>
-    <div><p class="wstep" id="kx-step"></p><h1 class="dt-title" style="margin:0" id="kx-h">${isNew ? "Wie viel?" : "Zahlung bearbeiten"}</h1></div>
+    <div><p class="wstep" id="kx-step"></p><h1 class="dt-title" style="margin:0" id="kx-h">${isNew ? "Neue Zahlung" : "Zahlung bearbeiten"}</h1></div>
     <div class="kst" data-kstep="1"><div class="kamt"><input id="kx-amt" inputmode="decimal" enterkeyhint="done" autocomplete="off" value="${x.amount ?? ""}" placeholder="0.00" aria-label="Betrag"><input id="kx-cur" list="kcurs" maxlength="3" autocomplete="off" value="${esc(x.cur)}" aria-label="Währung"></div>
     <p class="note" id="kx-est" style="margin:8px 0 0;min-height:1.4em"></p></div>
     <div class="kst" data-kstep="2"><div class="field"><span class="lb">Kategorie</span><div class="types" role="radiogroup">${KCATS.map(([k, l]) => kPill("kx-cat", k, l, (isNew ? pref("klastcat", "essen") : kCatOf(x)) === k)).join("")}</div></div>
@@ -6608,10 +6641,10 @@ function kExpenseSheet(x) {
       <div class="ksprow"><label for="kx-spB">Nur ${esc(kName("B"))}</label><input id="kx-spB" inputmode="decimal" autocomplete="off" placeholder="0" value="${x.split && +x.split.B ? x.split.B : ""}"><span class="kspcur"></span></div>
       <p class="ksprest" id="kx-sprest"></p>
     </div>
-    <div class="fgrid">
+    <details class="tips" id="kx-whenbox" ${isNew ? "" : "open"}><summary><span>Wann und wo <span class="muted" id="kx-whensum"></span></span><span>+</span></summary><div class="fgrid" style="padding-bottom:14px">
       <div class="field"><label for="kx-date">Datum</label><input id="kx-date" type="date" value="${esc(x.date)}"></div>
       <div class="field"><label for="kx-place">Ort</label><input id="kx-place" list="kplaces" value="${esc(x.place || kAutoPlace(x.date))}" autocomplete="off"><span class="hint" id="kx-placehint"></span></div>
-    </div></div>
+    </div></details></div>
     <div class="setgroup" id="kx-bank" ${isNew ? "hidden" : ""}><p class="label" style="margin:0">Bankbuchung in ${esc(C)}</p>
       <div class="field"><label for="kx-booked">Betrag laut Kontoauszug</label><input id="kx-booked" inputmode="decimal" autocomplete="off" value="${x.booked ?? ""}" placeholder="${a.v != null && a.est ? "geschätzt " + kNum(a.v) : "leer lassen, bis die Bank verbucht hat"}"></div>
       <p class="note" id="kx-hint" style="margin:0"></p></div>
@@ -6624,24 +6657,13 @@ function kExpenseSheet(x) {
     q("#kx-date").addEventListener("input", () => { if (!pTouched) cIn.value = kAutoPlace(q("#kx-date").value); });
     const updPlace = () => { const dt = q("#kx-date").value; q("#kx-placehint").textContent = S.trip && dt && dt < S.trip.start ? "Vor der Reise bezahlt: steht unter Reisevorbereitung." : ""; };
     q("#kx-date").addEventListener("input", updPlace); updPlace();
-    // guided steps for a new payment
-    const KW = { i: 1 };
-    const heads = { 1: "Wie viel?", 2: "Wofür?", 3: "Wer und wo?" };
-    const showStep = () => {
-      root.querySelectorAll(".kst").forEach((n) => n.classList.toggle("wz-hide", W && +n.dataset.kstep !== KW.i));
-      if (!W) return;
-      q("#kx-h").textContent = heads[KW.i];
-      q("#kx-step").textContent = `Neue Zahlung · ${KW.i} von 3`;
-      q("#kx-back").innerHTML = ui("back", 1.6) + (KW.i > 1 ? "Zurück" : "Abbrechen");
-      q("#k-save").textContent = KW.i < 3 ? "Weiter" : "Speichern";
-      const f = { 1: "#kx-amt", 2: "#kx-desc" }[KW.i];
-      if (f && !q(f).value) setTimeout(() => q(f)?.focus(), 60);
-    };
-    const next = () => {
-      if (KW.i === 1) { const amt = kParse(q("#kx-amt").value); if (amt == null || isNaN(amt) || amt === 0) { q("#kx-amt").focus(); return toast("Bitte einen Betrag eingeben."); } if (!/^[A-Z]{3}$/.test(q("#kx-cur").value.trim().toUpperCase())) return toast("Währung bitte als 3-Buchstaben-Code, z. B. EUR."); }
-      KW.i++; showStep();
-    };
-    q("#kx-back").addEventListener("click", () => { if (W && KW.i > 1) { KW.i--; showStep(); } else kCloseForm(); });
+    // eine Seite: Betrag, Wofür, Wer; Datum und Ort sind vorbelegt und eingeklappt
+    const KW = { i: 3 };
+    const whenSum = () => { const d = q("#kx-date").value, el = q("#kx-whensum"); if (el) el.textContent = `· ${d === today() ? "heute" : kShort(d)}${cIn.value.trim() ? " · " + cIn.value.trim() : ""}`; };
+    const showStep = () => { whenSum(); q("#k-save").textContent = "Speichern"; };
+    const next = () => {};
+    q("#kx-date").addEventListener("input", whenSum); cIn.addEventListener("input", whenSum);
+    q("#kx-back").addEventListener("click", () => kCloseForm());
     // suggestions that fit the category: your own appointments first, then common words
     const KSUGG = { unterkunft: ["Unterkunft", "Anzahlung Unterkunft", "Kurtaxe"], transport: ["Taxi", "Zug", "Bus", "Metro", "Fähre", "Flug", "Karte aufladen", "Gepäckaufbewahrung"], essen: ["Frühstück", "Mittagessen", "Abendessen", "Café", "Snacks", "Supermarkt", "Drinks"], aktiv: ["Eintritt", "Tour", "Massage", "Kurs"], einkauf: ["Kleidung", "Souvenirs", "Apotheke", "Drogerie"], sonst: ["SIM-Karte", "Trinkgeld", "Wäsche", "Gebühr Geldautomat"] };
     const KTYPES = { unterkunft: ["hotel"], transport: ["flight", "train", "bus", "ferry", "transfer"], essen: ["food"], aktiv: ["activity"], einkauf: [], sonst: ["other", "laundry"] };
@@ -6665,7 +6687,7 @@ function kExpenseSheet(x) {
         if (pl && during) { cIn.value = placeKey(pl); pTouched = true; } else if (!pTouched) cIn.value = kAutoPlace(q("#kx-date").value);
         upd();
       }
-      if (W) next();
+      if (W && !q("#kx-amt").value) q("#kx-amt").focus();
     });
     // Aufteilen: Beträge nur für A / nur für B, der Rest gemeinsam (live angezeigt)
     const spBox = q("#kx-splitbox");
@@ -6757,8 +6779,8 @@ function kExpenseSheet(x) {
       try { await S.db.collection("expenses").doc(x.id).set(out); setPref("klastcur", cur); if (country) setPref("klastcountry", country); setPref("klastcat", cat); kCloseForm(); toast(isNew ? "Zahlung gespeichert" : "Gespeichert"); }
       catch { save.disabled = false; toast("Speichern ging nicht."); }
     };
-    save.addEventListener("click", () => { if (W && KW.i < 3) next(); else doSave(); });
-    root.querySelectorAll("input").forEach((i) => i.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); if (W && KW.i < 3) next(); else doSave(); } }));
+    save.addEventListener("click", () => doSave());
+    root.querySelectorAll("input").forEach((i) => i.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); if (i.id === "kx-amt") q("#kx-desc").focus(); else if (i.id === "kx-cur") q("#kx-desc").focus(); else doSave(); } }));
   });
 }
 
@@ -6770,7 +6792,7 @@ function kSettleSheet(x) {
   x = x || { id: newId(), type: "settle", date: today(), from, amount: suggest || null, cur: C, booked: null, desc: "", history: [] };
   const lbl = (k) => joint ? `Von ${kName(k)}` : `${kName(k)} → ${kName(k === "A" ? "B" : "A")}`;
   kOpenForm(`${kTop("Speichern")}
-    <h1 class="dt-title" style="margin:0">${joint ? "Einzahlung aufs Konto" : "Ausgleich"}</h1>
+    <h1 class="dt-title" style="margin:0">${joint ? "Einzahlung aufs Konto" : "Rückzahlung"}</h1>
     <div class="types" role="radiogroup">${kPill("ks-from", "A", lbl("A"), x.from === "A")}${kPill("ks-from", "B", lbl("B"), x.from === "B")}</div>
     <div class="kamt"><input id="ks-amt" inputmode="decimal" autocomplete="off" value="${x.amount ?? ""}" placeholder="0.00" aria-label="Betrag"><input value="${esc(C)}" disabled aria-label="Währung"></div>
     ${isNew && suggest ? `<p class="note" style="margin:-14px 0 0">Vorgeschlagen ist der offene Betrag. Ein Teilbetrag geht auch.</p>` : ""}
@@ -7056,6 +7078,7 @@ $("s-kasse").addEventListener("click", (e) => {
   const b = e.target.closest("button"); if (!b) return;
   const d = b.dataset;
   if (b.id === "kadd") return kExpenseSheet(null);
+  if (b.id === "ksearch") return openSearch();
   if (d.kv) { KS.view = d.kv; renderKasse(); return; }
   if (d.kopen) { const x = S.expenses.find((v) => v.id === d.kopen); if (x) kIsSettle(x) ? kSettleSheet(x) : kExpenseSheet(x); return; }
   if (d.kcat) return kCategorySheet(d.kcat);
